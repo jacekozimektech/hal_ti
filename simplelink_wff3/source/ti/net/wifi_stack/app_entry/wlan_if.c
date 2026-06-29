@@ -82,7 +82,6 @@ extern StartRoleApps_t gRoleAppsParams;
 extern TFwEvent *gFwEvent;
 extern volatile uint8_t gFwCrashOccurred;
 
-
 WlanNetworkDataRecvCB_t RecvCallBack[2] = {0};
 
 dbg_cntr_trnspt_t g_stat_trnpt;
@@ -503,7 +502,7 @@ void set_finish_wlan_periodic_scan()
 
 int32_t is_wlan_periodic_scan_in_progress()
 {
-    int32_t ret;
+    int32_t ret = 0;
 #ifdef WLAN_PROTECTION
     wlan_if_lock();
     ret = g_oper_bitmap & WLAN_IF_PERIODIC_SCAN_IN_PROGRESS;
@@ -535,7 +534,7 @@ void set_finish_wlan_supplicant_operation()
 
 int32_t is_wlan_supplicant_operation_in_progress()
 {
-    int32_t ret;
+    int32_t ret = 0;
 #ifdef WLAN_PROTECTION
     wlan_if_lock();
     ret = g_oper_bitmap & WLAN_IF_SUPPLICANT_OPERATION_IN_PROGRESS;

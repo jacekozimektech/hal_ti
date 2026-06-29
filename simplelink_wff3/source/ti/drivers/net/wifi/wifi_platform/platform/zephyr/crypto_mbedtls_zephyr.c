@@ -80,6 +80,271 @@ static int crypto_zephyr_get_random(unsigned char *rand_buf, size_t rand_len)
     return sys_csrand_get(rand_buf, rand_len) ? -1 : 0;
 }
 
+#if defined(TI_WIFI_CRYPTO_BACKEND_ZEPHYR_PSA)
+#ifndef MBEDTLS_AES_DECRYPT
+#define MBEDTLS_AES_DECRYPT 0
+#endif
+
+#ifndef MBEDTLS_AES_ENCRYPT
+#define MBEDTLS_AES_ENCRYPT 1
+#endif
+
+struct crypto_zephyr_aes_ctx {
+    psa_key_id_t key_id;
+    psa_cipher_operation_t operation;
+};
+
+static void *aes_crypt_init_mode(const uint8_t *key, size_t len, int mode)
+{
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    struct crypto_zephyr_aes_ctx *ctx;
+    psa_status_t status;
+
+    ctx = os_calloc(1, sizeof(*ctx));
+    if (!ctx)
+        return NULL;
+
+    status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    psa_set_key_usage_flags(&attributes, mode == MBEDTLS_AES_ENCRYPT ?
+                                         PSA_KEY_USAGE_ENCRYPT :
+                                         PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attributes, PSA_ALG_ECB_NO_PADDING);
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attributes, len * 8);
+
+    status = psa_import_key(&attributes, key, len, &ctx->key_id);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    ctx->operation = psa_cipher_operation_init();
+    status = mode == MBEDTLS_AES_ENCRYPT ?
+             psa_cipher_encrypt_setup(&ctx->operation, ctx->key_id,
+                                      PSA_ALG_ECB_NO_PADDING) :
+             psa_cipher_decrypt_setup(&ctx->operation, ctx->key_id,
+                                      PSA_ALG_ECB_NO_PADDING);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    return ctx;
+
+error:
+    if (ctx->key_id != PSA_KEY_ID_NULL)
+        psa_destroy_key(ctx->key_id);
+    os_free(ctx);
+    return NULL;
+}
+
+static void *crypto_zephyr_aes_encrypt_init(const uint8_t *key, size_t len)
+{
+    return aes_crypt_init_mode(key, len, MBEDTLS_AES_ENCRYPT);
+}
+
+static int crypto_zephyr_aes_encrypt(void *ctx, const uint8_t *plain,
+                                      uint8_t *crypt)
+{
+    struct crypto_zephyr_aes_ctx *aes_ctx = ctx;
+    uint8_t out[MBEDTLS_AES_BLOCK_SIZE];
+    size_t output_len;
+    psa_status_t status;
+
+    status = psa_cipher_update(&aes_ctx->operation, plain,
+                               MBEDTLS_AES_BLOCK_SIZE, out, sizeof(out),
+                               &output_len);
+    if (status != PSA_SUCCESS || output_len != MBEDTLS_AES_BLOCK_SIZE)
+        return -1;
+
+    os_memcpy(crypt, out, sizeof(out));
+    return 0;
+}
+
+static void crypto_zephyr_aes_encrypt_deinit(void *ctx)
+{
+    if (!ctx)
+        return;
+
+    struct crypto_zephyr_aes_ctx *aes_ctx = ctx;
+
+    psa_cipher_abort(&aes_ctx->operation);
+    psa_destroy_key(aes_ctx->key_id);
+    os_free(aes_ctx);
+}
+
+static void *crypto_zephyr_aes_decrypt_init(const uint8_t *key, size_t len)
+{
+    return aes_crypt_init_mode(key, len, MBEDTLS_AES_DECRYPT);
+}
+
+static int crypto_zephyr_aes_decrypt(void *ctx, const uint8_t *crypt,
+                                      uint8_t *plain)
+{
+    struct crypto_zephyr_aes_ctx *aes_ctx = ctx;
+    uint8_t out[MBEDTLS_AES_BLOCK_SIZE];
+    size_t output_len;
+    psa_status_t status;
+
+    status = psa_cipher_update(&aes_ctx->operation, crypt,
+                               MBEDTLS_AES_BLOCK_SIZE, out, sizeof(out),
+                               &output_len);
+    if (status != PSA_SUCCESS || output_len != MBEDTLS_AES_BLOCK_SIZE)
+        return -1;
+
+    os_memcpy(plain, out, sizeof(out));
+    return 0;
+}
+
+static void crypto_zephyr_aes_decrypt_deinit(void *ctx)
+{
+    if (!ctx)
+        return;
+
+    struct crypto_zephyr_aes_ctx *aes_ctx = ctx;
+
+    psa_cipher_abort(&aes_ctx->operation);
+    psa_destroy_key(aes_ctx->key_id);
+    os_free(aes_ctx);
+}
+
+static int crypto_zephyr_aes_128_cbc_oper(const uint8_t *key,
+                                           const uint8_t *iv, uint8_t *data,
+                                           size_t data_len, int mode)
+{
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    size_t output_len;
+    size_t final_len;
+    uint8_t *tmp;
+    psa_status_t status;
+
+    tmp = os_malloc(data_len + MBEDTLS_AES_BLOCK_SIZE);
+    if (!tmp)
+        return -1;
+
+    status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT |
+                                         PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attributes, PSA_ALG_CBC_NO_PADDING);
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attributes, 128);
+
+    status = psa_import_key(&attributes, key, 16, &key_id);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = mode == MBEDTLS_AES_ENCRYPT ?
+             psa_cipher_encrypt_setup(&operation, key_id,
+                                      PSA_ALG_CBC_NO_PADDING) :
+             psa_cipher_decrypt_setup(&operation, key_id,
+                                      PSA_ALG_CBC_NO_PADDING);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_set_iv(&operation, iv, MBEDTLS_AES_BLOCK_SIZE);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_update(&operation, data, data_len, tmp,
+                               data_len + MBEDTLS_AES_BLOCK_SIZE,
+                               &output_len);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_finish(&operation, tmp + output_len,
+                               data_len + MBEDTLS_AES_BLOCK_SIZE - output_len,
+                               &final_len);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    if (output_len + final_len != data_len)
+        goto error;
+
+    os_memcpy(data, tmp, data_len);
+    psa_cipher_abort(&operation);
+    psa_destroy_key(key_id);
+    os_free(tmp);
+    return 0;
+
+error:
+    psa_cipher_abort(&operation);
+    if (key_id != PSA_KEY_ID_NULL)
+        psa_destroy_key(key_id);
+    os_free(tmp);
+    return -1;
+}
+
+static int crypto_zephyr_aes_ctr_encrypt(const uint8_t *key, size_t key_len,
+                                          const uint8_t *nonce, uint8_t *data,
+                                          size_t data_len)
+{
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    size_t output_len;
+    size_t final_len;
+    uint8_t *tmp;
+    psa_status_t status;
+
+    tmp = os_malloc(data_len + MBEDTLS_AES_BLOCK_SIZE);
+    if (!tmp)
+        return -1;
+
+    status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attributes, PSA_ALG_CTR);
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attributes, key_len * 8);
+
+    status = psa_import_key(&attributes, key, key_len, &key_id);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_encrypt_setup(&operation, key_id, PSA_ALG_CTR);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_set_iv(&operation, nonce, MBEDTLS_AES_BLOCK_SIZE);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_update(&operation, data, data_len, tmp,
+                               data_len + MBEDTLS_AES_BLOCK_SIZE,
+                               &output_len);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    status = psa_cipher_finish(&operation, tmp + output_len,
+                               data_len + MBEDTLS_AES_BLOCK_SIZE - output_len,
+                               &final_len);
+    if (status != PSA_SUCCESS)
+        goto error;
+
+    if (output_len + final_len != data_len)
+        goto error;
+
+    os_memcpy(data, tmp, data_len);
+    psa_cipher_abort(&operation);
+    psa_destroy_key(key_id);
+    os_free(tmp);
+    return 0;
+
+error:
+    psa_cipher_abort(&operation);
+    if (key_id != PSA_KEY_ID_NULL)
+        psa_destroy_key(key_id);
+    os_free(tmp);
+    return -1;
+}
+
+#else
 static void *aes_crypt_init_mode(const uint8_t *key, size_t len, int mode)
 {
     mbedtls_aes_context *aes = os_malloc(sizeof(*aes));
@@ -179,6 +444,8 @@ static int crypto_zephyr_aes_ctr_encrypt(const uint8_t *key, size_t key_len,
 
     return ret ? -1 : 0;
 }
+
+#endif /* TI_WIFI_CRYPTO_BACKEND_ZEPHYR_PSA */
 
 static int crypto_zephyr_pbkdf2_sha1_f(const char *passphrase,
                                         const uint8_t *ssid, size_t ssid_len,

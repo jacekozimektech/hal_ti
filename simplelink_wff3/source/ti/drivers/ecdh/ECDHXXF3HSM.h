@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +28,30 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/** ============================================================================
+ *  @file       ECDHXXF3HSM.h
+ *
+ *  @brief      ECDH HSM IP driver implementation for the Low Power F3 and WiFi
+ *              F3 family
+ *
+ *  This file should only be included in the board file to fill the #ECDH_config
+ *  struct.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #ECDH_RETURN_BEHAVIOR_CALLBACK is not supported when the
+ *  ECDH driver object is placed in PSRAM. #ECDH_construct() and #ECDH_open()
+ *  return NULL in this case. Use #ECDH_RETURN_BEHAVIOR_BLOCKING or
+ *  #ECDH_RETURN_BEHAVIOR_POLLING instead.
+ *
+ *  Additionally, #ECDH_construct() and #ECDH_open() return NULL if the ECDH
+ *  driver object is in PSRAM and either #HSMXXF3_inputBounce or
+ *  #HSMXXF3_outputBounce is smaller than #ECDH_COMPONENT_VECTOR_LENGTH
+ *  (144 bytes, the P-521 component vector size). The input buffer is required
+ *  because object->output[] is used as scratch for key material that is staged
+ *  via stageInput before being loaded into HSM assets.
+ *  See #HSMXXF3_BounceBuffers.
+ *
  */
 
 #ifndef ti_drivers_ecdh_ECDHXXF3HSM__include

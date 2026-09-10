@@ -164,6 +164,8 @@ typedef enum
     CME_STA_WLAN_BSS_LOSS_EVENT,
     CME_STA_WLAN_DHCP_RELEASED_EVENT,
     CME_STA_WLAN_DISCONNECT_COMPLETE_EVENT,
+    CME_STA_P2P_CLIENT_INIT_EVENT,
+    CME_STA_P2P_CLIENT_DEINIT_EVENT,
     CME_STA_NUM_OF_EVENTS
 } Cme_STA_events_e;
 
@@ -184,6 +186,7 @@ typedef enum
     CME_STA_FAST_CONNECT_USER,
     CME_STA_PROVISIONING_CONFIRM_USER,
     CME_DEVICE_ROC_TIMEOUT,
+    CME_P2P_CLIENT_USER,
 } Cme_Users_e;
 
 typedef enum
@@ -626,11 +629,11 @@ void cmeReassociationParamsClear();
         Checks if stored connection parameters exist and are valid for 
         reassociation purposes.
 
-    Parameters:    None
+    Parameters:    const _cme_minimized_wpa_ssid_t *apInputApSsid
 
-    Return code:   TRUE if valid connection parameters exist, FALSE otherwise
+    Return code:   TRUE if valid params for reassociation, FALSE otherwise
 ---------------------------------------------------------------------------- */
-Bool_e cmeAreReassociationParamsValid();
+Bool_e cmeAreReassociationParamsValid(const _cme_minimized_wpa_ssid_t *apInputApSsid);
 
 /* ----------------------------------------------------------------------------
  CME P2P exported Functions
@@ -645,6 +648,7 @@ void cmeP2pGroupRemove(void);
 void cmeP2pCancel(void);
 void cmeStopP2pFind(struct wpa_supplicant *wpa_s);
 void cmeP2pClearAll();
+void cmeP2pGroupAdd(const char *ssidPostfix, int32_t freq);
 
 /* ----------------------------------------------------------------------------
  cmeRemoveAllProfilesFromSupplicant
@@ -804,10 +808,11 @@ Cme_Users_e CmeDeviceFlow_GetCurrentUser();
 
 
 int CmeAPFlowSM(Cme_AP_events_e event);
-void CmeSetApParams(void *apParams);
+int CmeSetApParams(void *apParams);
 int CmeApFlowIsUp();
 int CmeApFlowIsDisconnecting();
 int CmeApAnyConnectedLinks();
+int8_t CmeGetConfiguredApTxPower(void);
 
 uint8_t CME_GetLastDisconnectReason();
 
@@ -820,7 +825,7 @@ extern int16_t LoadConnectionPolicy_GetFromFlash(BOOLEAN isInternal, BOOLEAN run
 
 
 
-Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidName);
+Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidName, Bool_e checkBssid);
 Bool_e CMEIsWPA3TransitionModeDisabled(uint32_t keyMgmt,int32_t profileId);
 int cmeCheckCurrentIsTransitionMode();
 
@@ -837,8 +842,6 @@ void CmeSetStaParams(void *staParams);
 void CmeApExtWpsFailureNotify(int8_t wpsFailCode);
 
 /* P2P Group Notifications */
-
-void CmeStaP2pClientDeinit(Cme_Users_e __user);
 
 void CmeP2pGroupStartedNotify(struct wpa_supplicant *wpa_s, uint8_t *groupPeerAddr, Bool_e isGroupTypeGo);
 void CmeP2pGroupRemovedNotify(RoleType_e roleType);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2024, Texas Instruments Incorporated
+ * Copyright (c) 2018-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1044,6 +1044,7 @@ void AESCBC_SegmentedOperation_init(AESCBC_SegmentedOperation *operationStruct);
  *  @retval #AESCBC_STATUS_SUCCESS               The operation succeeded.
  *  @retval #AESCBC_STATUS_ERROR                 The operation failed.
  *  @retval #AESCBC_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
+ *  @retval #AESCBC_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *  @retval #AESCBC_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @sa     #AESCBC_oneStepDecrypt()
@@ -1066,6 +1067,7 @@ int_fast16_t AESCBC_oneStepEncrypt(AESCBC_Handle handle, AESCBC_OneStepOperation
  *  @retval #AESCBC_STATUS_SUCCESS               The operation succeeded.
  *  @retval #AESCBC_STATUS_ERROR                 The operation failed.
  *  @retval #AESCBC_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
+ *  @retval #AESCBC_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *  @retval #AESCBC_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @sa     AESCBC_oneStepEncrypt()
@@ -1180,6 +1182,7 @@ int_fast16_t AESCBC_generateIV(AESCBC_Handle handle, uint8_t *iv, size_t ivSize,
  *  @retval #AESCBC_STATUS_RESOURCE_UNAVAILABLE     The required hardware
  *                                                  resource was not available.
  *                                                  Try again later.
+ *  @retval #AESCBC_STATUS_FEATURE_NOT_SUPPORTED    The requested operation is not supported by this implementation.
  *  @retval #AESCBC_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @post   #AESCBC_addData() or #AESCBC_finalize()
@@ -1206,6 +1209,7 @@ int_fast16_t AESCBC_addData(AESCBC_Handle handle, AESCBC_SegmentedOperation *ope
  *  @retval #AESCBC_STATUS_RESOURCE_UNAVAILABLE     The required hardware
  *                                                  resource was not available.
  *                                                  Try again later.
+ *  @retval #AESCBC_STATUS_FEATURE_NOT_SUPPORTED    The requested operation is not supported by this implementation.
  *  @retval #AESCBC_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  */
 int_fast16_t AESCBC_finalize(AESCBC_Handle handle, AESCBC_SegmentedOperation *operation);

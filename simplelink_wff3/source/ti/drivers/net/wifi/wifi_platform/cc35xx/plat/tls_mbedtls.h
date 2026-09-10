@@ -1,10 +1,3 @@
-/*
- * tls_mbedtls.h
- *
- *  Created on: 4 Nov 2025
- *      Author: user
- */
-
 #ifndef TLS_MBEDTLS_H_
 #define TLS_MBEDTLS_H_
 

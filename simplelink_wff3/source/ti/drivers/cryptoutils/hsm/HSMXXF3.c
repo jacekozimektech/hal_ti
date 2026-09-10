@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2026, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -38,6 +38,12 @@
 
 #include <ti/drivers/SHA2.h>
 #include <ti/drivers/sha2/SHA2XXF3HSM.h>
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* SHA3 only supported for CC35XX */
+    #include <ti/drivers/SHA3.h>
+    #include <ti/drivers/sha3/SHA3XXF3HSM.h>
+#endif
 
 #include <ti/drivers/TRNG.h>
 #include <ti/drivers/trng/TRNGXXF3HSM.h>
@@ -93,6 +99,8 @@
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include <ti/drivers/power/PowerCC27XX.h>
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include <ti/drivers/power/PowerCC23X1.h>
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     #include <ti/drivers/power/PowerWFF3.h>
 #endif
@@ -108,7 +116,15 @@
     #include DeviceFamily_constructPath(inc/hw_hsm_sec.h)
     #include DeviceFamily_constructPath(inc/hw_hsm_non_sec.h)
     #include DeviceFamily_constructPath(inc/hw_ints.h)
-    #include DeviceFamily_constructPath(inc/hw_soc_aon.h)
+    #include <ti/drivers/xmem/XMEMWFF3.h>
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include DeviceFamily_constructPath(inc/hw_memmap.h)
+    #include DeviceFamily_constructPath(inc/hw_types.h)
+    #include DeviceFamily_constructPath(inc/hw_vims.h)
+    #include DeviceFamily_constructPath(inc/hw_clkctl.h)
+    #include DeviceFamily_constructPath(inc/hw_hsm.h)
+    #include DeviceFamily_constructPath(inc/hw_hsmcrypto.h)
+    #include DeviceFamily_constructPath(inc/hw_ints.h)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include DeviceFamily_constructPath(inc/hw_memmap.h)
     #include DeviceFamily_constructPath(inc/hw_types.h)
@@ -331,10 +347,28 @@ typedef enum
     #define HSMCRYPTO_MBCTL_MB1OUT_EMTY HSM_MBXCTL_OUTEMP1
 #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) */
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
-    /* RNG Configuration retry limit (CC27XX only) */
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    /* RNG Configuration retry limit (CC27XX and CC23X1 only) */
     #define HSMXXF3_RNG_CONFIG_MAX_RETRIES 100
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/* ============================================================================
+ *  HSM PSRAM / external-flash bounce-buffer infrastructure (CC35xx only)
+ *
+ *  On CC35xx the HSM cannot access external memory (PSRAM, ext flash). When a
+ *  crypto driver is asked to operate on data that lives in external memory,
+ *  data is staged through internal-RAM bounce buffers via the XMEM driver
+ *  (which uses uDMA, the only bus master besides the CPU that can reach
+ *  external memory).
+ *
+ *  The application (or SysConfig) must define the buffer arrays in internal
+ *  RAM and set the HSMXXF3_inputBounce / HSMXXF3_outputBounce / HSMXXF3_auxBounce
+ *  variables declared in HSMXXF3.h.
+ * ============================================================================
+ */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) */
 
 /* Used by crypto drivers in blocking mode to wait on a result */
 static SemaphoreP_Struct HSMXXF3_operationSemaphore;
@@ -358,6 +392,242 @@ static Power_NotifyObj postNotify;
 /* Keep a global variable to track the overall HSM RNG NRBG engine mode */
 static HSMXXF3_NRBGMode HSMXXF3_nrbgMode = HSMXXF3_MODE_CRNG;
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/* XMEM handles for staging external-memory crypto buffers through internal
+ * RAM. Opened once in HSMXXF3_init(); a NULL handle means the corresponding
+ * region is unavailable and submitToken will reject operations targeting it.
+ */
+static XMEM_Handle HSMXXF3_psramHandle = NULL;
+static XMEM_Handle HSMXXF3_flashHandle = NULL;
+
+/* Output staging tracker. Each operation has at most one OUT-to-PSRAM
+ * destination (input/output/AAD slots are independent and OUT is only
+ * produced by the HSM, never piggybacked on another op). On a successful
+ * HSM result, postBounceOut writes HSMXXF3_outputBounce back to userAddr.
+ */
+static void *HSMXXF3_outBounceUserAddr = NULL;
+static size_t HSMXXF3_outBounceLen     = 0U;
+
+/* Set by any stage* helper that fails (e.g. external buffer larger than
+ * its slot, NULL XMEM handle, XMEM read error, CALLBACK + PSRAM output).
+ * submitToken refuses to submit when this is set, so the op fails cleanly
+ * even though the construct fn already populated the EIP130 token.
+ */
+static bool HSMXXF3_constructError    = false;
+static bool HSMXXF3_bounceUnavailable = false;
+
+static XMEM_Handle HSMXXF3_handleForType(XMEM_MemType memType)
+{
+    return (memType == XMEM_MEM_PSRAM) ? HSMXXF3_psramHandle : HSMXXF3_flashHandle;
+}
+
+/* Stage a user input buffer for HSM consumption. If the buffer is in
+ * internal RAM, return the original address unchanged. If it is in PSRAM
+ * or external flash, XMEM-read it into HSMXXF3_inputBounce and return the
+ * bounce slot. On error (oversized, no XMEM handle, XMEM failure) sets
+ * HSMXXF3_constructError so submitToken aborts cleanly.
+ */
+static const void *HSMXXF3_stageInput(const void *data, size_t len)
+{
+    XMEM_MemType memType = XMEMWFF3_addrToType((uintptr_t)data);
+    XMEM_Handle xmemHandle;
+
+    /* If data is in internal memory, pass it straight through */
+    if (memType == XMEM_MEM_INTERNAL)
+    {
+        return data;
+    }
+
+    if (HSMXXF3_inputBounce.size == 0)
+    {
+        HSMXXF3_bounceUnavailable = true;
+        return data;
+    }
+
+    /* Return internal buffer for len = 0, as this may be a valid operation
+     * that is passed to the HSM. In that case, we should pass a valid address
+     * in case the HSM tries to access the address despite a length of 0.
+     */
+    if (len == 0)
+    {
+        return HSMXXF3_inputBounce.buffer;
+    }
+
+    if (len > HSMXXF3_inputBounce.size)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    xmemHandle = HSMXXF3_handleForType(memType);
+
+    if (xmemHandle == NULL)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    if (XMEMWFF3_read(xmemHandle, XMEMWFF3_addrToOffset((uintptr_t)data), HSMXXF3_inputBounce.buffer, len, XMEM_READ) !=
+        XMEM_STATUS_SUCCESS)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+    return HSMXXF3_inputBounce.buffer;
+}
+
+/* Stage a user AUX buffer for HSM consumption. Same semantics as
+ * HSMXXF3_stageInput but uses the AUX slot.
+ */
+static const void *HSMXXF3_stageAux(const void *data, size_t len)
+{
+    XMEM_MemType memType = XMEMWFF3_addrToType((uintptr_t)data);
+    XMEM_Handle xmemHandle;
+
+    /* If data is in internal memory, pass it straight through */
+    if (memType == XMEM_MEM_INTERNAL)
+    {
+        return data;
+    }
+
+    if (HSMXXF3_auxBounce.size == 0)
+    {
+        HSMXXF3_bounceUnavailable = true;
+        return data;
+    }
+
+    /* Return internal buffer for len = 0, as this may be a valid operation
+     * that is passed to the HSM. In that case, we should pass a valid address
+     * in case the HSM tries to access the address despite a length of 0.
+     */
+    if (len == 0)
+    {
+        return HSMXXF3_auxBounce.buffer;
+    }
+
+    if (len > HSMXXF3_auxBounce.size)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    xmemHandle = HSMXXF3_handleForType(memType);
+
+    if (xmemHandle == NULL)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    if (XMEMWFF3_read(xmemHandle, XMEMWFF3_addrToOffset((uintptr_t)data), HSMXXF3_auxBounce.buffer, len, XMEM_READ) !=
+        XMEM_STATUS_SUCCESS)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    return HSMXXF3_auxBounce.buffer;
+}
+
+/* Stage a user output buffer to receive HSM-produced data. For internal
+ * RAM, returns the original address. For PSRAM, returns the output slot
+ * and records the user address so postBounceOut can write back after the
+ * HSM completes. External flash output is rejected (write not in scope).
+ *
+ * The CALLBACK + PSRAM rejection is enforced in submitToken, where the
+ * return behavior is known.
+ */
+static void *HSMXXF3_stageOutput(void *data, size_t len)
+{
+    XMEM_MemType memType = XMEMWFF3_addrToType((uintptr_t)data);
+
+    /* If data is in internal memory, pass it straight through */
+    if (memType == XMEM_MEM_INTERNAL)
+    {
+        return data;
+    }
+
+    if (memType == XMEM_MEM_FLASH)
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+
+    if (HSMXXF3_outputBounce.size == 0)
+    {
+        HSMXXF3_bounceUnavailable = true;
+        return data;
+    }
+
+    /* Return internal buffer for len = 0, as this may be a valid operation
+     * that is passed to the HSM. In that case, we should pass a valid address
+     * in case the HSM tries to access the address despite a length of 0.
+     */
+    if (len == 0)
+    {
+        HSMXXF3_outBounceUserAddr = data;
+        HSMXXF3_outBounceLen      = len;
+        return HSMXXF3_outputBounce.buffer;
+    }
+
+    if ((len > HSMXXF3_outputBounce.size) || (HSMXXF3_psramHandle == NULL))
+    {
+        HSMXXF3_constructError = true;
+        return data;
+    }
+    HSMXXF3_outBounceUserAddr = data;
+    HSMXXF3_outBounceLen      = len;
+    return HSMXXF3_outputBounce.buffer;
+}
+
+/* Write the staged output bounce back to user PSRAM. Called after the HSM
+ * completes (waitForResult for POLLING/BLOCKING; HWI for CALLBACK mode -
+ * but HSMXXF3_submitToken rejects CALLBACK + PSRAM output before the op
+ * starts, so this path only sees a no-op in CALLBACK mode).
+ *
+ * Skips write-back when the HSM reported an error - leaving the user's
+ * PSRAM untouched is preferable to copying garbage into it.
+ */
+static void HSMXXF3_postBounceOut(void)
+{
+    if (HSMXXF3_outBounceUserAddr == NULL)
+    {
+        return;
+    }
+    if (Eip130Token_Result_Code(&operation.resultToken) == 0)
+    {
+        size_t off = XMEMWFF3_addrToOffset((uintptr_t)HSMXXF3_outBounceUserAddr);
+        (void)XMEMWFF3_write(HSMXXF3_psramHandle, off, HSMXXF3_outputBounce.buffer, HSMXXF3_outBounceLen, 0U);
+    }
+    HSMXXF3_outBounceUserAddr = NULL;
+    HSMXXF3_outBounceLen      = 0U;
+}
+
+/* Open XMEM handles for the PSRAM and external-flash regions. Called once
+ * from HSMXXF3_init(). A NULL handle means the region is unavailable; the
+ * driver will reject operations targeting that region but otherwise
+ * functions normally for internal-RAM operations.
+ */
+static void HSMXXF3_openXmemHandles(void)
+{
+    XMEM_Params xmemParams;
+
+    XMEMWFF3_init();
+
+    xmemParams.regionBase      = 0U;
+    xmemParams.regionStartAddr = EXT_PSRAM_BASE;
+    xmemParams.regionSize      = XMEM_MAX_PSRAM_SIZE;
+    xmemParams.deviceNum       = XMEM_MEM_PSRAM;
+    HSMXXF3_psramHandle        = XMEMWFF3_open(&xmemParams);
+
+    xmemParams.regionBase      = 0U;
+    xmemParams.regionStartAddr = EXT_FLASH_SEC_BASE;
+    xmemParams.regionSize      = XMEM_MAX_FLASH_SIZE;
+    xmemParams.deviceNum       = XMEM_MEM_FLASH;
+    HSMXXF3_flashHandle        = XMEMWFF3_open(&xmemParams);
+}
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) */
+
 /* Forward declarations */
 static void HSMXXF3_writeToken(const uint32_t *token, uint32_t len);
 static void HSMXXF3_hwiFxn(uintptr_t arg0);
@@ -367,7 +637,7 @@ static void HSMXXF3_enableClock(void);
 static void HSMXXF3_initAIC(void);
 static int_fast16_t HSMXXF3_getEngineSystemInfo();
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 static int_fast16_t HSMXXF3_submitResetToken(void);
 static int_fast16_t HSMXXF3_searchStaticAsset(uint32_t assetNumber, uint32_t *assetID);
 static int_fast16_t HSMXXF3_isHSMfirmwareImgAccepted(void);
@@ -384,7 +654,8 @@ static int_fast16_t HSMXXF3_isHSMfirmwareImgAccepted(void)
     return ((HWREG(HSMCRYPTO_BASE + HSMCRYPTO_O_MODSTA) & HSMCRYPTO_MODSTA_FWACPTD_M) == HSMCRYPTO_MODSTA_FWACPTD);
 }
 
-#endif
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /* Write directly to HSM Mailbox */
 static void HSMXXF3_writeToken(const uint32_t *token, uint32_t len)
@@ -424,6 +695,12 @@ static void HSMXXF3_hwiFxn(uintptr_t arg0)
     }
     else if (operation.returnBehavior == HSMXXF3_RETURN_BEHAVIOR_CALLBACK)
     {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        /* postBounceOut is a no-op for CALLBACK mode because preBounceIn
+         * rejects PSRAM output in CALLBACK mode (XMEM is unsafe in HWI).
+         * Internal-RAM-only ops still pass through without copying. */
+        HSMXXF3_postBounceOut();
+#endif
         if (operation.callbackFxn != NULL)
         {
             /* Call driver post-processing function and pass back the handle */
@@ -472,7 +749,7 @@ static int_fast16_t HSMXXF3_boot(void)
 
     HSMXXF3_initMbox();
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     uint32_t delay;
     token[0] = BOOT_TOKEN_WORD0;
     token[1] = BOOT_TOKEN_WORD1;
@@ -567,7 +844,7 @@ static int_fast16_t HSMXXF3_boot(void)
     return result;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*
  *  ======== HSMXXF3_handleRngWarning ========
  * The HSM will indicate in all output tokens if a DRBG re-seed is needed within
@@ -669,7 +946,8 @@ static int_fast16_t HSMXXF3_initializeRng(void)
         return HSMXXF3_STATUS_ERROR;
     }
 }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*
  *  ======== HSMXXF3_initMbox ========
@@ -714,7 +992,7 @@ static void HSMXXF3_enableClock(void)
 {
     uint32_t temp = 0;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
     /* Disable VIMS lock, allocate 3 32KB blocks to HSM */
     temp                          = HWREG(VIMS_BASE + VIMS_O_CFG);
@@ -744,7 +1022,8 @@ static void HSMXXF3_enableClock(void)
 
     /* Unlock CPUID0 and CPUID1 */
     HWREG(HSMCRYPTO_BASE + HSM_O_MBXLCKOUT) = 0xFFFFFCFC;
-#endif /* (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 }
 
 /*
@@ -783,7 +1062,7 @@ void HSMXXF3_constructRTOSObjects(void)
  */
 void HSMXXF3_disableClock(void)
 {
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     HWREG(CLKCTL_BASE + CLKCTL_O_CLKENCLR1) = CLKCTL_CLKENCLR1_HSM_CLK_CLR;
     /* Wait for clock to be disabled */
     while ((HWREG(CLKCTL_BASE + CLKCTL_O_CLKCFG1) & CLKCTL_CLKCFG1_HSM_M) == CLKCTL_CLKCFG1_HSM_CLK_EN) {}
@@ -959,12 +1238,17 @@ bool HSMXXF3_isStandaloneDMASupportEnabled(void)
     bool retval = false;
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
-    /* HSM FW versions beyond 3.1.0 have DMA operations decoupled from ECC operations. */
-    if ((HSMXXF3_isInitialized) && (((HSMXXF3_engineSystemInfo.customFwVersion.major == 3) &&
-                                     (HSMXXF3_engineSystemInfo.customFwVersion.minor == 1)) ||
-                                    (HSMXXF3_engineSystemInfo.customFwVersion.major >= 4)))
+    if (HSMXXF3_isInitialized)
     {
-        retval = true;
+        uint32_t major = HSMXXF3_engineSystemInfo.customFwVersion.major;
+        uint32_t minor = HSMXXF3_engineSystemInfo.customFwVersion.minor;
+        uint32_t patch = HSMXXF3_engineSystemInfo.customFwVersion.patch;
+
+        /* HSM FW versions >= 3.1.1 have DMA operations decoupled from ECC operations. */
+        if (major > 3 || (major == 3 && (minor > 1 || (minor == 1 && patch >= 1))))
+        {
+            retval = true;
+        }
     }
 #endif
 
@@ -1012,7 +1296,7 @@ int_fast16_t HSMXXF3_init(void)
             /* Register power notification function */
             Power_registerNotify(&postNotify, PowerLPF3_ENTERING_STANDBY, HSMXXF3_postNotifyFxn, (uintptr_t)0U);
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
             Power_setDependency(PowerLPF3_PERIPH_HSM);
 #endif
 
@@ -1034,6 +1318,12 @@ int_fast16_t HSMXXF3_init(void)
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
         HSMXXF3_nrbgMode = HSMXXF3_MODE_TRNG;
+
+        /* Open XMEM handles for PSRAM/external-flash bouncing. Failures
+         * leave handles NULL; submitToken will reject ops that need the
+         * unavailable region but operations on internal RAM still work.
+         */
+        HSMXXF3_openXmemHandles();
 #else
         HSMXXF3_nrbgMode = HSMXXF3_MODE_CRNG;
 #endif
@@ -1042,7 +1332,7 @@ int_fast16_t HSMXXF3_init(void)
     return HSMXXF3_hsmReturnStatus;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*
  *  ======== HSMXXF3_searchStaticAsset ========
  */
@@ -1139,7 +1429,8 @@ static int_fast16_t HSMXXF3_provisionHukInternal(HSMXXF3_NRBGMode nrbgMode)
 
     return status;
 }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*
  *  ======== HSMXXF3_provisionHUK ========
@@ -1153,7 +1444,7 @@ int_fast16_t HSMXXF3_provisionHUK(void)
         return status;
     }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     uint32_t hukAssetID = 0U;
     uint16_t retry;
 
@@ -1258,7 +1549,8 @@ int_fast16_t HSMXXF3_provisionHUK(void)
      * Returning sucess here.
      */
     status = HSMXXF3_STATUS_SUCCESS;
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
     return status;
 }
@@ -1281,6 +1573,13 @@ bool HSMXXF3_acquireLock(uint32_t timeout, uintptr_t driverHandle)
 
         (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
         (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        HSMXXF3_outBounceUserAddr = NULL;
+        HSMXXF3_outBounceLen      = 0U;
+        HSMXXF3_constructError    = false;
+        HSMXXF3_bounceUnavailable = false;
+#endif
 
         /* Wakeup HSM. The HSMXXF3_wakeUp() function will just return success
          * if HSM is already awake.
@@ -1359,6 +1658,30 @@ int_fast16_t HSMXXF3_submitToken(HSMXXF3_ReturnBehavior retBehavior,
         operation.returnBehavior = retBehavior;
         operation.callbackFxn    = callbackFxn;
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        /* Construct fns staged any PSRAM/ext-flash buffers via XMEM and
+         * passed bounce-slot addresses into the EIP130 token. If any
+         * staging failed, or if the user wants CALLBACK mode for an op
+         * with PSRAM output (XMEM write-back can't run from HWI), refuse
+         * to submit and let the caller see the error path.
+         */
+        if (HSMXXF3_bounceUnavailable)
+        {
+            HSMXXF3_bounceUnavailable = false;
+            HSMXXF3_outBounceUserAddr = NULL;
+            HSMXXF3_outBounceLen      = 0U;
+            return HSMXXF3_STATUS_BOUNCE_UNAVAILABLE;
+        }
+        if (HSMXXF3_constructError ||
+            ((HSMXXF3_outBounceUserAddr != NULL) && (retBehavior == HSMXXF3_RETURN_BEHAVIOR_CALLBACK)))
+        {
+            HSMXXF3_constructError    = false;
+            HSMXXF3_outBounceUserAddr = NULL;
+            HSMXXF3_outBounceLen      = 0U;
+            return HSMXXF3_STATUS_ERROR;
+        }
+#endif
+
         /* Enable interrupt in blocking and callback modes */
         if (operation.returnBehavior != HSMXXF3_RETURN_BEHAVIOR_POLLING)
         {
@@ -1403,7 +1726,7 @@ int_fast16_t HSMXXF3_submitToken(HSMXXF3_ReturnBehavior retBehavior,
     return result;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*
  *  ======== HSMXXF3_submitResetToken ========
  */
@@ -1450,7 +1773,8 @@ static int_fast16_t HSMXXF3_submitResetToken(void)
 
     return status;
 }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*
  *  ======== HSMXXF3_waitForResult ========
@@ -1487,6 +1811,11 @@ int_fast16_t HSMXXF3_waitForResult(void)
     if ((result == HSMXXF3_STATUS_SUCCESS) && ((operation.returnBehavior == HSMXXF3_RETURN_BEHAVIOR_POLLING) ||
                                                (operation.returnBehavior == HSMXXF3_RETURN_BEHAVIOR_BLOCKING)))
     {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        /* Stage any output back to PSRAM before invoking the user's callback.
+         * Runs in task context here, so XMEM is safe to use. */
+        HSMXXF3_postBounceOut();
+#endif
         if (operation.callbackFxn != NULL)
         {
             (void)operation.callbackFxn(operation.driverHandle);
@@ -1582,10 +1911,11 @@ void HSMXXF3_updateInternalNRBGMode(void)
  */
 int32_t HSMXXF3_getResultCode(void)
 {
-    int_fast16_t status = HSMXXF3_STATUS_SUCCESS;
-    int32_t resultCode  = Eip130Token_Result_Code(&operation.resultToken);
+    int32_t resultCode = Eip130Token_Result_Code(&operation.resultToken);
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    int_fast16_t status = HSMXXF3_STATUS_SUCCESS;
+
     status = HSMXXF3_handleRngWarning();
 
     if (status != HSMXXF3_STATUS_SUCCESS)
@@ -1598,7 +1928,8 @@ int32_t HSMXXF3_getResultCode(void)
          */
         resultCode = EIP130TOKEN_RESULT_PANIC_ERROR;
     }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
     return resultCode;
 }
@@ -1617,6 +1948,14 @@ uint32_t HSMXXF3_getResultAssetID(void)
 void HSMXXF3_getResultDigest(uint8_t *digest, size_t digestLength)
 {
     Eip130Token_Result_Hash_CopyState(&operation.resultToken, digestLength, digest);
+}
+
+/*
+ *  ======== HSMXXF3_getResultHashState ========
+ */
+void HSMXXF3_getResultHashState(uint8_t *state, size_t stateLength)
+{
+    Eip130Token_Result_Hash_CopyState(&operation.resultToken, stateLength, state);
 }
 
 /*
@@ -1648,6 +1987,9 @@ void HSMXXF3_getAESCMACSignMac(uint8_t *mac, uint8_t macLength)
  */
 void HSMXXF3_getPublicDataRead(uint32_t assetId, const uint8_t *data, uint8_t dataLength)
 {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    data = HSMXXF3_stageOutput((void *)data, dataLength);
+#endif
     Eip130Token_Command_PublicData_Read(&operation.commandToken, assetId, (uintptr_t)data, dataLength);
 }
 
@@ -1669,6 +2011,10 @@ void HSMXXF3_constructCreateAssetToken(uint64_t assetPolicy, uint32_t assetLengt
 void HSMXXF3_constructLoadPlaintextAssetToken(const uint8_t *input_p, const uint32_t inputLength, uint32_t assetId)
 {
     Eip130Token_Command_AssetLoad_Plaintext(&operation.commandToken, assetId);
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    input_p = HSMXXF3_stageInput(input_p, inputLength);
+#endif
 
     Eip130Token_Command_AssetLoad_SetInput(&operation.commandToken, (uintptr_t)input_p, inputLength);
 }
@@ -1711,6 +2057,7 @@ void HSMXXF3_constructSHA2PhysicalToken(SHA2XXF3HSM_Object *object)
 {
     bool isInitWithDefault;
     bool isFinalize;
+    const void *inputAddr = object->input;
 
     switch (object->mode)
     {
@@ -1738,13 +2085,17 @@ void HSMXXF3_constructSHA2PhysicalToken(SHA2XXF3HSM_Object *object)
             break;
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+#endif
+
     if (object->key)
     {
         Eip130Token_Command_Mac(&operation.commandToken,
                                 object->algorithm,
                                 isInitWithDefault,
                                 isFinalize,
-                                (uintptr_t)object->input,
+                                (uintptr_t)inputAddr,
                                 object->inputLength);
 
         /* Key ID to specify the asset from HSM asset store */
@@ -1761,7 +2112,7 @@ void HSMXXF3_constructSHA2PhysicalToken(SHA2XXF3HSM_Object *object)
                                  object->algorithm,
                                  isInitWithDefault,
                                  isFinalize,
-                                 (uintptr_t)object->input,
+                                 (uintptr_t)inputAddr,
                                  object->inputLength);
 
         Eip130Token_Command_Hash_CopyState(&operation.commandToken, (uint8_t *)object->digest, object->digestLength);
@@ -1769,6 +2120,96 @@ void HSMXXF3_constructSHA2PhysicalToken(SHA2XXF3HSM_Object *object)
 
     Eip130Token_Command_Hash_SetTotalMessageLength(&operation.commandToken, object->totalDataLength);
 }
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*
+ *  ======== HSMXXF3_constructSHA2PhysicalToken ========
+ */
+void HSMXXF3_constructSHA3PhysicalToken(SHA3XXF3HSM_Object *object)
+{
+    bool isInitWithDefault;
+    bool isFinalize;
+    const void *inputAddr = object->input;
+
+    switch (object->mode)
+    {
+        case VEXTOKEN_MODE_HASH_MAC_INIT2CONT:
+            isInitWithDefault = true;
+            isFinalize        = false;
+            break;
+
+        case VEXTOKEN_MODE_HASH_MAC_CONT2FINAL:
+            isInitWithDefault = false;
+            isFinalize        = true;
+            break;
+
+        case VEXTOKEN_MODE_HASH_MAC_CONT2CONT:
+            isInitWithDefault = false;
+            isFinalize        = false;
+            break;
+
+        case VEXTOKEN_MODE_HASH_MAC_INIT2FINAL:
+            /* For this case, we fall through to the default case. */
+        default:
+            /* If no valid mode we assume a one step operation to conclude a
+             * hash operation.
+             */
+            isInitWithDefault = true;
+            isFinalize        = true;
+            break;
+    }
+
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+    #endif
+
+    if (object->key)
+    {
+        Eip130Token_Command_Mac(&operation.commandToken,
+                                object->algorithm,
+                                isInitWithDefault,
+                                isFinalize,
+                                (uintptr_t)inputAddr,
+                                object->inputLength);
+
+        /* Key ID to specify the asset from HSM asset store. */
+        Eip130Token_Command_Mac_SetASIDKey(&operation.commandToken, object->keyAssetID);
+
+        if (object->tempAssetID)
+        {
+            Eip130Token_Command_Mac_SetASIDState(&operation.commandToken, object->tempAssetID);
+        }
+    }
+    else
+    {
+        Eip130Token_Command_Hash(&operation.commandToken,
+                                 object->algorithm,
+                                 isInitWithDefault,
+                                 isFinalize,
+                                 (uintptr_t)inputAddr,
+                                 object->inputLength);
+
+        Eip130Token_Command_Hash_CopyState(&operation.commandToken,
+                                           (uint8_t *)object->intermediateState,
+                                           sizeof(object->intermediateState));
+    }
+
+    if (isFinalize)
+    {
+        /* The SHA3 token requires TotalMessageLength as (total % blockSize); if
+         * 0, use blockSize. Only needed for finalization to compute correct
+         * padding.
+         */
+        uint64_t msgLen = (uint64_t)object->totalDataLength;
+        msgLen          = msgLen % (uint64_t)object->blockSize;
+        if (msgLen == 0U)
+        {
+            msgLen = (uint64_t)object->blockSize;
+        }
+        Eip130Token_Command_Hash_SetTotalMessageLength(&operation.commandToken, msgLen);
+    }
+}
+#endif
 
 /*
  *  ======== HSMXXF3_constructECDSAPhysicalToken ========
@@ -1779,6 +2220,7 @@ void HSMXXF3_constructECDSAPhysicalToken(ECDSAXXF3HSM_Object *object)
     Eip130TokenDmaAddress_t output = 0U;
     uint32_t signSize              = (HSM_SIGNATURE_VCOUNT * (HSM_ASYM_DATA_SIZE_VWB(object->curveLength)));
     uint8_t command                = VEXTOKEN_PKAS_ECDSA_SIGN;
+    const uint8_t *digestAddr      = object->input;
 
     if (object->operationType == ECDSA_OPERATION_TYPE_VERIFY)
     {
@@ -1794,6 +2236,28 @@ void HSMXXF3_constructECDSAPhysicalToken(ECDSAXXF3HSM_Object *object)
         output = (uintptr_t)&object->signature[0];
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    digestAddr = HSMXXF3_stageInput(object->input, BITS_TO_BYTES(object->digestLength));
+
+    if (!HSMXXF3_isStandaloneDMASupportEnabled())
+    {
+        if (object->operationType == ECDSA_OPERATION_TYPE_VERIFY)
+        {
+            /* Signature is a DMA input for verify. Use the aux bounce buffer
+             * to avoid conflicting with the hash already staged in inputBounce.
+             */
+            output = (Eip130TokenDmaAddress_t)(uintptr_t)HSMXXF3_stageAux(&object->signature[0], signSize);
+        }
+        else
+        {
+            /* Signature is a DMA output for sign. stageOutput uses outputBounce
+             * which is independent of inputBounce, so no conflict.
+             */
+            output = (Eip130TokenDmaAddress_t)(uintptr_t)HSMXXF3_stageOutput(&object->signature[0], signSize);
+        }
+    }
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          command,
                                          nWord,
@@ -1808,7 +2272,7 @@ void HSMXXF3_constructECDSAPhysicalToken(ECDSAXXF3HSM_Object *object)
                                          signSize);
 
     Eip130Token_Command_Pk_Asset_SetExplicitDigest(&operation.commandToken,
-                                                   object->input,
+                                                   (uint8_t *)digestAddr,
                                                    BITS_TO_BYTES(object->digestLength));
 }
 
@@ -1837,7 +2301,11 @@ void HSMXXF3_constructECDHGenPubPhysicalToken(ECDHXXF3HSM_Object *object)
     }
     else
     {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        output = (uintptr_t)HSMXXF3_stageOutput(&object->output[0], outputSize);
+#else
         output = (uintptr_t)&object->output[0];
+#endif
     }
 
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
@@ -1921,6 +2389,13 @@ void HSMXXF3_constructEDDSAGenPubKeyPhysicalToken(EDDSAXXF3HSM_Object *object)
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    uint32_t signatureSize = HSM_ASYM_DATA_SIZE_VWB(EDDSA_CURVE_LENGTH_25519);
+    uintptr_t output       = (uintptr_t)object->signature;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    output = (uintptr_t)HSMXXF3_stageOutput(object->signature, signatureSize);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_GEN_PUBKEY,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -1931,8 +2406,8 @@ void HSMXXF3_constructEDDSAGenPubKeyPhysicalToken(EDDSAXXF3HSM_Object *object)
                                          object->publicKeyAssetID,
                                          0,
                                          0,
-                                         (uintptr_t)object->signature,
-                                         HSM_ASYM_DATA_SIZE_VWB(EDDSA_CURVE_LENGTH_25519));
+                                         output,
+                                         signatureSize);
 }
 
 /*
@@ -1943,6 +2418,12 @@ void HSMXXF3_constructEDDSASignInitialPhysicalToken(EDDSAXXF3HSM_Object *object)
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr = object->input;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_SIGN_INITIAL,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -1951,7 +2432,7 @@ void HSMXXF3_constructEDDSASignInitialPhysicalToken(EDDSAXXF3HSM_Object *object)
                                          object->privateKeyAssetID,
                                          object->paramAssetID,
                                          object->tempAssetID,
-                                         (uintptr_t)object->input,
+                                         (uintptr_t)inputAddr,
                                          object->inputLength,
                                          0U,
                                          0U);
@@ -1965,11 +2446,17 @@ void HSMXXF3_constructEDDSAIntermediateHashPhysicalToken(const uint8_t *input, s
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr = input;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(input, inputLength);
+#endif
+
     Eip130Token_Command_Hash(&operation.commandToken,
                              VEXTOKEN_ALGO_HASH_SHA512,
                              false,
                              false,
-                             (uintptr_t)input,
+                             (uintptr_t)inputAddr,
                              inputLength);
 
     Eip130Token_Command_Hash_SetStateASID(&operation.commandToken, tempAssetID);
@@ -1985,6 +2472,12 @@ void HSMXXF3_constructEDDSASignUpdatePhysicalToken(EDDSAXXF3HSM_Object *object)
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr = object->input;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_SIGN_UPDATE,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -1993,7 +2486,7 @@ void HSMXXF3_constructEDDSASignUpdatePhysicalToken(EDDSAXXF3HSM_Object *object)
                                          object->publicKeyAssetID,
                                          0U,
                                          object->stateAssetID,
-                                         (uintptr_t)object->input,
+                                         (uintptr_t)inputAddr,
                                          object->inputLength,
                                          0U,
                                          0U);
@@ -2011,6 +2504,14 @@ void HSMXXF3_constructEDDSASignFinalizePhysicalToken(EDDSAXXF3HSM_Object *object
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr = object->input;
+    uintptr_t output         = (uintptr_t)object->signature;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+    output    = (uintptr_t)HSMXXF3_stageOutput(object->signature, EDDSA_COMPONENT_VECTOR_LENGTH_BYTES);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_SIGN_FINAL,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -2019,9 +2520,9 @@ void HSMXXF3_constructEDDSASignFinalizePhysicalToken(EDDSAXXF3HSM_Object *object
                                          0U,
                                          0U,
                                          object->stateAssetID,
-                                         (uintptr_t)object->input,
+                                         (uintptr_t)inputAddr,
                                          object->inputLength,
-                                         (uintptr_t)object->signature,
+                                         output,
                                          EDDSA_COMPONENT_VECTOR_LENGTH_BYTES);
 
     Eip130Token_Command_Pk_Asset_SetAdditionalLength(&operation.commandToken, signOperation->preHashedMessageLength);
@@ -2035,6 +2536,17 @@ void HSMXXF3_constructEDDSAVerifyInitialPhysicalToken(EDDSAXXF3HSM_Object *objec
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr     = object->input;
+    const uint8_t *signatureAddr = object->signature;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr     = HSMXXF3_stageInput(object->input, object->inputLength);
+    /* Signature is a DMA input for verify. Use the aux bounce buffer
+     * to avoid conflicting with the message already staged in inputBounce.
+     */
+    signatureAddr = HSMXXF3_stageAux(object->signature, EDDSA_COMPONENT_VECTOR_LENGTH_BYTES);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_VERIFY_INITIAL,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -2043,9 +2555,9 @@ void HSMXXF3_constructEDDSAVerifyInitialPhysicalToken(EDDSAXXF3HSM_Object *objec
                                          object->publicKeyAssetID,
                                          object->paramAssetID,
                                          object->tempAssetID,
-                                         (uintptr_t)object->input,
+                                         (uintptr_t)inputAddr,
                                          object->inputLength,
-                                         (uintptr_t)object->signature,
+                                         (uintptr_t)signatureAddr,
                                          EDDSA_COMPONENT_VECTOR_LENGTH_BYTES);
 }
 
@@ -2059,6 +2571,12 @@ void HSMXXF3_constructEDDSAVerifyFinalizePhysicalToken(EDDSAXXF3HSM_Object *obje
     (void)memset(&operation.commandToken, 0, sizeof(Eip130Token_Command_t));
     (void)memset(&operation.resultToken, 0, sizeof(Eip130Token_Result_t));
 
+    const uint8_t *inputAddr = object->input;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr = HSMXXF3_stageInput(object->input, object->inputLength);
+#endif
+
     Eip130Token_Command_Pk_Asset_Command(&operation.commandToken,
                                          VEXTOKEN_PKAS_EDDSA_VERIFY_FINAL,
                                          HSM_ASYM_DATA_SIZE_B2W(EDDSA_CURVE_LENGTH_25519),
@@ -2067,7 +2585,7 @@ void HSMXXF3_constructEDDSAVerifyFinalizePhysicalToken(EDDSAXXF3HSM_Object *obje
                                          0U,
                                          0U,
                                          object->stateAssetID,
-                                         (uintptr_t)object->input,
+                                         (uintptr_t)inputAddr,
                                          object->inputLength,
                                          0U,
                                          0U);
@@ -2135,13 +2653,32 @@ void HSMXXF3_constructGCMToken(const AESGCMXXF3HSM_Object *object, bool saveIV, 
     }
 #endif
 
+    const void *inputAddr = object->input;
+    void *outputAddr      = object->output;
+    const void *aadAddr   = object->aad;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    if (object->input != NULL)
+    {
+        inputAddr = HSMXXF3_stageInput(object->input, inputLength);
+    }
+    if (object->output != NULL)
+    {
+        outputAddr = HSMXXF3_stageOutput(object->output, inputLength);
+    }
+    if (object->aad != NULL)
+    {
+        aadAddr = HSMXXF3_stageAux(object->aad, object->aadLength);
+    }
+#endif
+
     operation.commandToken.W[0] = HSM_ENCRYPTION_TOKEN_WORD0;
     operation.commandToken.W[2] = object->totalDataLength;
-    operation.commandToken.W[3] = (uintptr_t)object->input;
+    operation.commandToken.W[3] = (uintptr_t)inputAddr;
     operation.commandToken.W[5] = inputLength;
-    operation.commandToken.W[6] = (uintptr_t)object->output;
+    operation.commandToken.W[6] = (uintptr_t)outputAddr;
     operation.commandToken.W[8] = inputLength;
-    operation.commandToken.W[9] = (uintptr_t)object->aad;
+    operation.commandToken.W[9] = (uintptr_t)aadAddr;
 
     operation.commandToken.W[11] = (HSM_ENCRYPTION_TOKEN_WORD11) | (HSM_ENCRYPTION_TOKEN_WORD11_GCM) | (loadIV << 9) |
                                    (saveIV << 12);
@@ -2260,13 +2797,23 @@ void HSMXXF3_constructCCMToken(const AESCCMXXF3_Object *object, bool saveIV, boo
     }
 #endif
 
+    const void *inputAddr = object->input;
+    void *outputAddr      = object->output;
+    const void *aadAddr   = object->aad;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr  = HSMXXF3_stageInput(inputAddr, inputLength);
+    outputAddr = HSMXXF3_stageOutput(outputAddr, inputLength);
+    aadAddr    = HSMXXF3_stageAux(aadAddr, object->aadLength);
+#endif
+
     operation.commandToken.W[0] = HSM_ENCRYPTION_TOKEN_WORD0;
     operation.commandToken.W[2] = object->totalDataLength;
-    operation.commandToken.W[3] = (uintptr_t)object->input;
+    operation.commandToken.W[3] = (uintptr_t)inputAddr;
     operation.commandToken.W[5] = inputLength;
-    operation.commandToken.W[6] = (uintptr_t)object->output;
+    operation.commandToken.W[6] = (uintptr_t)outputAddr;
     operation.commandToken.W[8] = inputLength;
-    operation.commandToken.W[9] = (uintptr_t)object->aad;
+    operation.commandToken.W[9] = (uintptr_t)aadAddr;
 
     operation.commandToken.W[11] = (HSM_ENCRYPTION_TOKEN_WORD11) | (HSM_ENCRYPTION_TOKEN_WORD11_CCM) | (loadIV << 9) |
                                    (saveIV << 12);
@@ -2412,21 +2959,22 @@ static void HSMXXF3_constructCommonAESECB(AESECBXXF3_Object *object, uint8_t *ke
  */
 void HSMXXF3_constructAESECBOneStepPhysicalToken(AESECBXXF3_Object *object, uint8_t *key)
 {
-    Eip130TokenDmaAddress_t input  = (uintptr_t)object->operation->input;
-    Eip130TokenDmaAddress_t output = (uintptr_t)object->operation->output;
-
     uint32_t inputDataLength  = object->operation->inputLength;
-    uint32_t outputDataLength = object->operation->inputLength;
+    uint32_t outputDataLength = HSMXXF3_getOutputBufferLength(inputDataLength);
+    const void *inputAddr     = object->operation->input;
+    void *outputAddr          = object->operation->output;
 
-    outputDataLength = HSMXXF3_getOutputBufferLength(inputDataLength);
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr  = HSMXXF3_stageInput(inputAddr, inputDataLength);
+    outputAddr = HSMXXF3_stageOutput(outputAddr, outputDataLength);
+#endif
 
     HSMXXF3_constructCommonAESECB(object, key);
 
-    /* Set data addresses */
     Eip130Token_Command_Crypto_SetDataAddresses(&operation.commandToken,
-                                                input,
+                                                (uintptr_t)inputAddr,
                                                 inputDataLength,
-                                                output,
+                                                (uintptr_t)outputAddr,
                                                 outputDataLength);
 }
 
@@ -2491,22 +3039,28 @@ static void HSMXXF3_constructCommonAESCTR(AESCTRXXF3_Object *object, uint8_t *ke
  */
 void HSMXXF3_constructAESCTROneStepPhysicalToken(AESCTRXXF3_Object *object, uint8_t *key)
 {
-
     uint32_t inputDataLength  = object->inputLength;
     uint32_t outputDataLength = object->inputLength;
+    const void *inputAddr     = object->input;
+    void *outputAddr          = object->output;
 
     inputDataLength += AES_BLOCK_SIZE_ALIGN;
     inputDataLength &= (uint32_t)(~AES_BLOCK_SIZE_ALIGN);
 
     outputDataLength = HSMXXF3_getOutputBufferLength(inputDataLength);
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr  = HSMXXF3_stageInput(inputAddr, inputDataLength);
+    outputAddr = HSMXXF3_stageOutput(outputAddr, outputDataLength);
+#endif
+
     HSMXXF3_constructCommonAESCTR(object, key);
 
     /* Set data addresses */
     Eip130Token_Command_Crypto_SetDataAddresses(&operation.commandToken,
-                                                (uintptr_t)object->input,
+                                                (uintptr_t)inputAddr,
                                                 inputDataLength,
-                                                (uintptr_t)object->output,
+                                                (uintptr_t)outputAddr,
                                                 outputDataLength);
 }
 
@@ -2569,17 +3123,21 @@ static void HSMXXF3_constructCommonAESCBC(AESCBCXXF3_Object *object, uint8_t *ke
 void HSMXXF3_constructAESCBCOneStepPhysicalToken(AESCBCXXF3_Object *object, uint8_t *key)
 {
     uint32_t inputDataLength  = object->inputLength;
-    uint32_t outputDataLength = object->inputLength;
+    uint32_t outputDataLength = HSMXXF3_getOutputBufferLength(inputDataLength);
+    const void *inputAddr     = object->input;
+    void *outputAddr          = object->output;
 
-    outputDataLength = HSMXXF3_getOutputBufferLength(inputDataLength);
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    inputAddr  = HSMXXF3_stageInput(inputAddr, inputDataLength);
+    outputAddr = HSMXXF3_stageOutput(outputAddr, outputDataLength);
+#endif
 
     HSMXXF3_constructCommonAESCBC(object, key);
 
-    /* Set data addresses */
     Eip130Token_Command_Crypto_SetDataAddresses(&operation.commandToken,
-                                                (uintptr_t)object->input,
+                                                (uintptr_t)inputAddr,
                                                 inputDataLength,
-                                                (uintptr_t)object->output,
+                                                (uintptr_t)outputAddr,
                                                 outputDataLength);
 }
 
@@ -2625,7 +3183,11 @@ void HSMXXF3_constructCMACToken(AESCMACXXF3_Object *object, bool isFirst, bool i
 
     operation.commandToken.W[0] = HSM_MAC_TOKEN_WORD0;
     operation.commandToken.W[2] = inputLength;
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    operation.commandToken.W[3] = (uintptr_t)HSMXXF3_stageInput(object->input, inputLength);
+#else
     operation.commandToken.W[3] = (uintptr_t)object->input;
+#endif
     operation.commandToken.W[5] = inputLength;
 
     operation.commandToken.W[6] = ((!isFinal) << 5) | ((!isFirst) << 4) | operationAlgo;
@@ -2638,7 +3200,7 @@ void HSMXXF3_constructCMACToken(AESCMACXXF3_Object *object, bool isFirst, bool i
     }
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*
  *  ======== HSMXXF3_constructRNGSwitchNRBGWithDefaultsPhysicalToken ========
  */
@@ -2665,14 +3227,20 @@ void HSMXXF3_constructRNGReseedDRBGPhysicalToken(void)
 {
     Eip130Token_Command_PRNG_ReseedNow(&operation.commandToken);
 }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*
  *  ======== HSMXXF3_constructRNGGetRandomNumberPhysicalToken ========
  */
 void HSMXXF3_constructRNGGetRandomNumberPhysicalToken(uintptr_t entropyBuffer, size_t entropyRequested)
 {
-    Eip130Token_Command_RandomNumber_Generate(&operation.commandToken, entropyRequested, entropyBuffer);
+    uintptr_t outAddr = entropyBuffer;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    outAddr = (uintptr_t)HSMXXF3_stageOutput((void *)entropyBuffer, entropyRequested);
+#endif
+    Eip130Token_Command_RandomNumber_Generate(&operation.commandToken, entropyRequested, outAddr);
 }
 
 /*
@@ -2680,14 +3248,19 @@ void HSMXXF3_constructRNGGetRandomNumberPhysicalToken(uintptr_t entropyBuffer, s
  */
 void HSMXXF3_constructRNGGetRawRandomNumberPhysicalToken(uintptr_t entropyBuffer, size_t entropyRequested)
 {
-    uint16_t rawKey = HSM_CRNG_RAW_KEY_ENC;
+    uint16_t rawKey   = HSM_CRNG_RAW_KEY_ENC;
+    uintptr_t outAddr = entropyBuffer;
 
     if (HSMXXF3_nrbgMode == HSMXXF3_MODE_TRNG)
     {
         rawKey = HSM_TRNG_RAW_KEY_ENC;
     }
 
-    Eip130Token_Command_RandomNumber_Generate(&operation.commandToken, entropyRequested, entropyBuffer);
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    outAddr = (uintptr_t)HSMXXF3_stageOutput((void *)entropyBuffer, entropyRequested * HSM_RAW_RNG_BLOCK_SIZE);
+#endif
+
+    Eip130Token_Command_RandomNumber_Generate(&operation.commandToken, entropyRequested, outAddr);
 
     Eip130Token_Command_RandomNumber_SetRawKey(&operation.commandToken, rawKey);
 }

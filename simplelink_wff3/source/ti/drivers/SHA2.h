@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2024, Texas Instruments Incorporated
+ * Copyright (c) 2017-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -734,6 +734,8 @@ int_fast16_t SHA2_setupHmac(SHA2_Handle handle, const CryptoKey *key);
  *                                             large for the HSM DMA controller
  *                                             to handle.
  *  @retval #SHA2_STATUS_CANCELED              The hash operation was canceled.
+ *  @retval #SHA2_STATUS_UNSUPPORTED           The requested operation is not
+ *                                             supported by this implementation.
  *
  *  @sa     #SHA2_open(), #SHA2_reset(), #SHA2_finalize()
  */
@@ -825,6 +827,8 @@ int_fast16_t SHA2_finalizeHmac(SHA2_Handle handle, void *hmac);
  *                                             large for the HSM DMA controller
  *                                             to handle.
  *  @retval #SHA2_STATUS_CANCELED              The hash operation was canceled.
+ *  @retval #SHA2_STATUS_UNSUPPORTED           The requested operation is not
+ *                                             supported by this implementation.
  *
  *  @sa     #SHA2_open()
  */

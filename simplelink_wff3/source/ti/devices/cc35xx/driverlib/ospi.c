@@ -3,7 +3,7 @@
  *
  *  Description:    Driver for the peripheral OSPI controller
  *
- *  Copyright (c) 2024 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -49,7 +49,7 @@
 // Get Read Data or Status Register
 //
 //*****************************************************************************
-uint32_t __attribute__((section(".TI.ramfunc"))) OSPIGetSTIGDataRegister(uint32_t regSelect)
+uint32_t __attribute__((noinline, section(".TI.ramfunc"))) OSPIGetSTIGDataRegister(uint32_t regSelect)
 {
     return HWREG(OSPI_REGS_BASE + regSelect);
 }
@@ -69,7 +69,7 @@ void OSPISetSTIGDataRegister(uint32_t regSelect, uint32_t regData)
 // Set STIG command
 //
 //*****************************************************************************
-void __attribute__((section(".TI.ramfunc"))) OSPIExecuteSTIGWriteCommand(OSPISTIGConfig_t OspiStigCommand)
+void __attribute__((noinline, section(".TI.ramfunc"))) OSPIExecuteSTIGWriteCommand(OSPISTIGConfig_t OspiStigCommand)
 {
     uint32_t configReg = 0;
 
@@ -122,7 +122,7 @@ void __attribute__((section(".TI.ramfunc"))) OSPIExecuteSTIGWriteCommand(OSPISTI
 // Execute STIG Command
 //
 //*****************************************************************************
-void __attribute__((section(".TI.ramfunc"))) OSPIStartSTIGCommand(uint32_t configReg)
+void __attribute__((noinline, section(".TI.ramfunc"))) OSPIStartSTIGCommand(uint32_t configReg)
 {
 
     uint32_t idleXSPICounterBefore = 0;
@@ -171,7 +171,7 @@ void __attribute__((section(".TI.ramfunc"))) OSPIStartSTIGCommand(uint32_t confi
 // Set address for command execution by STIG
 //
 //*****************************************************************************
-void __attribute__((section(".TI.ramfunc"))) OSPISetCommandAddress(uint32_t address)
+void __attribute__((noinline, section(".TI.ramfunc"))) OSPISetCommandAddress(uint32_t address)
 {
     // This register should be setup while the controller is idle.
     HWREG(OSPI_REGS_BASE + OSPI_O_FLASH_CMD_ADDR) = address;

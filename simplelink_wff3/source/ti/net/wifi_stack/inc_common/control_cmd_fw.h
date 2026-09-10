@@ -49,7 +49,7 @@
 
 #define MSG_QUEUE_SIZE (4)
 #define EVENT_STACK_SIZE (1200)
-#define EVENT_TRANSPORT_THRD_PRIORITY (8)
+#define EVENT_TRANSPORT_THREAD_PRIORITY (8)
 
 
 #define OSPREY_INTERNAL_DESC_SIZE   200
@@ -380,6 +380,18 @@ typedef struct __attribute__((packed))
     cmd_debug_header_t cmdDebugHeader;
     LinkAdaptDebugCfg_t linkAdaptParams;
 }cmd_link_adapt_debug_t;
+
+typedef struct __attribute__((packed))
+{
+    cmd_debug_header_t cmdDebugInterrogateHeader;
+    TemperatureGet_t temperatureGetParams;
+}cmd_debug_temperature_get_t;
+
+typedef struct __attribute__((packed))
+{
+    cmd_debug_header_t cmdDebugHeader;
+    LinkRobustnessBitmapCfg_t linkRobustnessBitmapParams;
+}cmd_debug_link_robustness_bitmap_t;
 
 typedef struct __attribute__((packed))
 {

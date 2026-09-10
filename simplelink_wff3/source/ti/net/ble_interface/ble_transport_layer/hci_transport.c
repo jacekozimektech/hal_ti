@@ -122,11 +122,11 @@ static int HciTransport_WriteHciPacket(uint8_t instance, uint8_t* pHciPkt, uint1
 THREAD DEFINES
 ******************************************************************************/
 #ifdef CC33XX
-#define HCI_THRD_PRIORITY   (3)
-#define NPI_THRD_PRIORITY   (3)
+#define HCI_THREAD_PRIORITY   (3)
+#define NPI_THREAD_PRIORITY   (3)
 #else
-#define HCI_THRD_PRIORITY   (6)
-#define NPI_THRD_PRIORITY   (6)
+#define HCI_THREAD_PRIORITY   (6)
+#define NPI_THREAD_PRIORITY   (6)
 #endif
 #define HCI_THRD_STACK_SIZE (2048)
 
@@ -140,8 +140,8 @@ THREAD VARIABLES
 ******************************************************************************/
 hciThread_t g_pThread[HCI_TRANSPORT_NUM_INSTANCES] =
 {
-   /*BLE_UART*/  { NULL, "hciThread", HCI_THRD_STACK_SIZE, HCI_THRD_PRIORITY, HciThread_Entry, HCI_TRANSPORT_UART_BLE, FALSE },
-   /*NPI_UART*/  { NULL, "npiThread", HCI_THRD_STACK_SIZE, NPI_THRD_PRIORITY, HciThread_Entry, HCI_TRANSPORT_UART_NPI, FALSE }
+   /*BLE_UART*/  { NULL, "hciThread", HCI_THRD_STACK_SIZE, HCI_THREAD_PRIORITY, HciThread_Entry, HCI_TRANSPORT_UART_BLE, FALSE },
+   /*NPI_UART*/  { NULL, "npiThread", HCI_THRD_STACK_SIZE, NPI_THREAD_PRIORITY, HciThread_Entry, HCI_TRANSPORT_UART_NPI, FALSE }
 };
 
 #define TransportThreadIsRunning(instance)  g_pThread[instance].threadRunning

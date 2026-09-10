@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -56,9 +56,13 @@
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include <ti/drivers/power/PowerCC27XX.h>
     #include DeviceFamily_constructPath(inc/hw_hsmcrypto.h)
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include <ti/drivers/power/PowerCC23X1.h>
+    #include DeviceFamily_constructPath(inc/hw_hsmcrypto.h)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     #include <ti/drivers/power/PowerWFF3.h>
     #include DeviceFamily_constructPath(inc/hw_hsm.h)
+    #include <ti/drivers/xmem/XMEMWFF3.h>
 #endif
 
 /* Max key length supported by HSM for HMAC- needed for KeyStore material retrieval */
@@ -326,6 +330,19 @@ SHA2_Handle SHA2_construct(SHA2_Config *config, const SHA2_Params *params)
         return NULL;
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Reject construction if object->buffer is in PSRAM and the bounce buffer
+     * is too small for the largest possible block (SHA-512, 128 B). This
+     * covers all hash types so no per-operation check is needed.
+     */
+    if (XMEMWFF3_isAddrExternal((uintptr_t)object->buffer) &&
+        SHA2XXF3HSM_MAX_BLOCK_SIZE_BYTES > HSMXXF3_inputBounce.size)
+    {
+        object->isOpen = false;
+        return NULL;
+    }
+#endif
+
     object->bytesInBuffer  = 0;
     object->bytesProcessed = 0;
     object->returnBehavior = params->returnBehavior;
@@ -380,6 +397,37 @@ void SHA2_close(SHA2_Handle handle)
  */
 int_fast16_t SHA2_addData(SHA2_Handle handle, const void *data, size_t length)
 {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When the input is in PSRAM/external flash and exceeds the HSM bounce
+     * buffer, split the call into chunks of at most HSMXXF3_inputBounce.size
+     * bytes and let the existing init/update state machine in
+     * SHA2XXF3HSM_addData stitch them back together. CALLBACK mode is
+     * rejected because each chunk would fire its own callback.
+     */
+    if ((length > HSMXXF3_inputBounce.size) && XMEMWFF3_isAddrExternal((uintptr_t)data))
+    {
+        SHA2XXF3HSM_Object *object = handle->object;
+        const uint8_t *chunk       = (const uint8_t *)data;
+        int_fast16_t status;
+
+        if (object->returnBehavior == SHA2_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return SHA2_STATUS_UNSUPPORTED;
+        }
+        while (length > 0U)
+        {
+            size_t chunkSize = (length > HSMXXF3_inputBounce.size) ? HSMXXF3_inputBounce.size : length;
+            status           = SHA2XXF3HSM_addData(handle, chunk, chunkSize);
+            if (status != SHA2_STATUS_SUCCESS)
+            {
+                return status;
+            }
+            chunk += chunkSize;
+            length -= chunkSize;
+        }
+        return SHA2_STATUS_SUCCESS;
+    }
+#endif
     return SHA2XXF3HSM_addData(handle, data, length);
 }
 
@@ -772,6 +820,29 @@ static int_fast16_t SHA2XXF3HSM_finalize(SHA2_Handle handle, void *digest)
  */
 int_fast16_t SHA2_hashData(SHA2_Handle handle, const void *data, size_t dataLength, void *digest)
 {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Same chunking strategy as SHA2_addData: when the input is in external
+     * memory and too large for the bounce buffer, fall back to the segmented
+     * init/update/finalize path. SHA2_addData below already chunks internally.
+     */
+    if ((dataLength > HSMXXF3_inputBounce.size) && XMEMWFF3_isAddrExternal((uintptr_t)data))
+    {
+        SHA2XXF3HSM_Object *object = handle->object;
+        int_fast16_t status;
+
+        if (object->returnBehavior == SHA2_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return SHA2_STATUS_UNSUPPORTED;
+        }
+        SHA2_reset(handle);
+        status = SHA2_addData(handle, data, dataLength);
+        if (status != SHA2_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        return SHA2_finalize(handle, digest);
+    }
+#endif
     return SHA2XXF3HSM_hashData(handle, data, dataLength, digest);
 }
 

@@ -33,7 +33,7 @@
 
   FILENAME:       osi.h
 
-  DESCRIPTION:    ThreadX wrapper, includes ThreadX definitions, macros and APIs
+  DESCRIPTION:    freertos wrapper, includes freertos definitions, macros and APIs
 
   ----------------------------------------------------------------------------- */
 #ifndef __OSI_H__
@@ -61,6 +61,9 @@ extern "C" {
 #define ATTRIBUTE __attribute__ ((used))
 
 extern int Report(const char *pcFormat,...);
+extern int ReportWithTime(const char *pcFormat,...);
+
+
 #ifndef assert
 extern void assert(unsigned int condition);
 #endif
@@ -79,9 +82,6 @@ extern void ASSERT_GENERAL(unsigned int condition);
 //#define ASSERT_ON_MALLOC_FAIL
 #undef ASSERT_ON_MALLOC_FAIL
 
-//TODO create osi_common.h which will be at inc_common.h and remove the osi_commmon.c func declaration from this file
-//TODO remove all the declaration that are already at osi_type.h from  osi_kernel.h and instead include osi_type in here
-//TODO move to osi_type.h all the definitions that don't require adaptation.
 
 #ifdef COLLECT_HEAP_DEBUG_INFO
 
@@ -317,7 +317,6 @@ struct os_time {
     os_time_t usec;
 };
 
-// TODO Check if needed
 struct os_tm {
     int sec; /* 0..59 or 60 for leap seconds */
     int min; /* 0..59 */
@@ -446,6 +445,13 @@ OsiThread_t osi_GetCurrentThread(void);
  * @return size_t the number of free bytes on the heap.
  */
 size_t osi_GetFreeHeapSize();
+
+/**
+ * @brief Gets the minimum free stack words remaining for the current task since it started.
+ *
+ * @return uint32_t high watermark in words (minimum free stack remaining).
+ */
+uint32_t osi_GetStackHighWaterMark(void);
 
 /**
  * @brief Suspends the calling thread for the specified number of seconds.

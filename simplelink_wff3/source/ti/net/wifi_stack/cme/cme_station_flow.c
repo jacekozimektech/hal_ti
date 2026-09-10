@@ -118,10 +118,12 @@ const CmeStationSmEntry_t gCmeStationFlowSM[CME_STA_NUM_OF_EVENTS] =
     /* CME_STA_SCAN_DONE                    */  {CmeScanDone,                   (1<<CME_STA_SUPPLICANT_MANAGED_STATE) | (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_IDLE_STATE)},
     /* CME_STA_WLAN_ROLE_UP_EVENT           */  {CmeStationConfigured,          (1<<CME_STA_CONNECTED_STATE)},
     /* CME_STA_WLAN_DISCONNECT_REQ_EVENT    */  {CmeStationDisconnectReq,       (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE) | (1<<CME_STA_SUPPLICANT_MANAGED_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) },
-    /* CME_STA_WLAN_PEER_DISCONNECT_REQ     */  {CmeStationPeerDisconnectReq,   (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) },
+    /* CME_STA_WLAN_PEER_DISCONNECT_REQ     */  {CmeStationPeerDisconnectReq,   (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) |(1<<CME_STA_SUPPLICANT_MANAGED_STATE) },
     /* CME_STA_WLAN_BSS_LOSS_EVENT          */  {CmeStationBssLossDiss,         (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE) | (1<<CME_STA_SUPPLICANT_MANAGED_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) },
     /* CME_STA_WLAN_DHCP_RELEASED_EVENT     */  {CmeStationDisconnectKick,      (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE)},
-    /* CME_STA_WLAN_DISCONNECT_COMPLETE_EVENT*/ {CmeStationDeauthReceived,      (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_SUPPLICANT_MANAGED_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) | (1<<CME_STA_IDLE_STATE)}
+    /* CME_STA_WLAN_DISCONNECT_COMPLETE_EVENT*/ {CmeStationDeauthReceived,      (1<<CME_STA_DISCONNECTING_STATE) | (1<<CME_STA_SUPPLICANT_MANAGED_STATE) |(1<<CME_STA_CONNECTED_STATE) |(1<<CME_STA_CONFIGURED_STATE) | (1<<CME_STA_IDLE_STATE)},
+    /* CME_STA_P2P_CLIENT_INIT_EVENT         */ {CmeStaP2pClientInit,           (1<<CME_STA_DISABLED_STATE) | (1<<CME_STA_IDLE_STATE)},
+    /* CME_STA_P2P_CLIENT_DEINIT_EVENT       */ {CmeStaP2pClientDeinit,         (1<<CME_STA_IDLE_STATE) | (1<<CME_STA_SUPPLICANT_MANAGED_STATE) | (1<<CME_STA_CONNECTED_STATE) | (1<<CME_STA_CONFIGURED_STATE) | (1<<CME_STA_DISCONNECT_PEND_DHCP_REL_STATE) | (1<<CME_STA_DISCONNECTING_STATE)}
 };
 
 
@@ -278,7 +280,7 @@ int CmeStationFlowSM(Cme_STA_events_e event, Cme_Users_e user)
     {
         GTRACE(GRP_CME_STA_FLOW, "CmeStationFlowSM: ERROR! UnExpected event currentState=ENUM(Cme_STA_states_e, %d), Event=ENUM(Cme_STA_events_e, %d), User: ENUM(Cme_Users_e, %d)",
                                    gCmeStationFlowState_ull, event, gCmeStationSmUser_ull);
-        CME_PRINT_REPORT_ERROR("\n\rCME :CCmeStationFlowSM: ERROR! UnExpected event currentState=ENUM(Cme_STA_states_e, %d), Event=ENUM(Cme_STA_events_e, %d), User: ENUM(Cme_Users_e, %d)",
+        CME_PRINT_REPORT_ERROR("\n\rCME :CmeStationFlowSM: ERROR! UnExpected event currentState=ENUM(Cme_STA_states_e, %d), Event=ENUM(Cme_STA_events_e, %d), User: ENUM(Cme_Users_e, %d)",
                                    gCmeStationFlowState_ull, event, gCmeStationSmUser_ull);
         rc = -1;
     }
@@ -395,8 +397,12 @@ void CmeStaP2pClientInit(Cme_Users_e __user)
 
 void CmeStaP2pClientDeinit(Cme_Users_e __user)
 {
-    //update state to disableing
-    gCmeStationFlowState_ull = CME_STA_DISABLED_STATE;
+    // Supplicant manages P2P client interface lifetime, not the role manager.
+    // If STA role is still activated it keeps ownership of the SM at IDLE.
+    // Only move to DISABLED when STA itself is not active.
+    gCmeStationFlowState_ull = cme_is_sta_role_like_activated()
+                               ? CME_STA_IDLE_STATE
+                               : CME_STA_DISABLED_STATE;
 }
 
 void CmeStationDeInit(Cme_Users_e __user)

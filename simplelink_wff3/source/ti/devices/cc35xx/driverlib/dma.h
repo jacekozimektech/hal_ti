@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __DMA_H__
-#define __DMA_H__
+#ifndef ti_devices_dma__include
+#define ti_devices_dma__include
 
 //*****************************************************************************
 //
@@ -540,4 +540,4 @@ __STATIC_INLINE uint32_t DMAGetChannelPeripheral(uint32_t channel)
 //
 //*****************************************************************************
 
-#endif // __DMA_H__
+#endif // ti_devices_dma__include

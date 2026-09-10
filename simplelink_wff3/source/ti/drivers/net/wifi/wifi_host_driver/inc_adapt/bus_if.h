@@ -33,6 +33,7 @@
 #define LOWER_MAC_IF_BUSIF_H_
 
 #include "osi_type.h"
+#include "fw_status.h"
 
 /******************************************************************************
                       external  FUNCTION PROTOTYPES

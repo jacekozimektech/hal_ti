@@ -76,9 +76,7 @@ Bool_e g_wait_p2p_scan_complete = FALSE;
 OsiSyncObj_t p2p_find_stopped_syncObj = NULL;
 #endif // CC35XX
 
-#ifdef CONFIG_WIFI_TI_CC35XX
 #define WLAN_PROTECTION
-#endif /* CONFIG_WIFI_TI_CC35XX */
 
 extern StartRoleApps_t gRoleAppsParams;
 extern TFwEvent *gFwEvent;
@@ -94,7 +92,9 @@ extern uint32_t drv_getDriverLink(uint32_t uNetIfId, uint8_t* dst);
 extern char *cmeWlanGetKeyMgmt(void);
 extern uint32_t txHwQueue_SetInitializeHwBlocks (uint32_t tx_BlocksAvailable, uint32_t tx_NumTxDescriptor);
 int32_t CME_updateVendorElementsNotify(RoleType_e roleType,  uint16_t vendorElements_length, uint8_t* pVendorElements);
+#ifndef TI_STA_ONLY_BUILD
 int32_t CME_setPeerAgingTimeout(uint32_t agingTimeOut);
+#endif
 #define WLAN_AP_MAX_INACTIVITY (5 * 60 * 1000) //need to be same as AP_MAX_INACTIVITY
 #define WLAN_AP_MIN_INACTIVITY (5000) //5 second minimum
 
@@ -353,6 +353,7 @@ void set_finish_wlan_stop()
 #endif
 }
 
+#ifndef TI_STA_ONLY_BUILD
 // wlan_roleup
 uint32_t set_cond_in_process_wlan_ap_roleup()
 {
@@ -393,6 +394,7 @@ void set_finish_wlan_ap_roledown()
     wlan_if_unlock();
 #endif
 }
+#endif // TI_STA_ONLY_BUILD
 
 
 uint32_t set_cond_in_process_wlan_sta_roleup()
@@ -844,7 +846,6 @@ int Wlan_Start(WlanEventHandlerCB_t eventHandlerCB)
 {
     int32_t ret = OSI_OK;
 
-
     ret = set_cond_in_process_wlan_start();
     if(ret != OSI_OK)
     {
@@ -913,26 +914,20 @@ int Wlan_Start(WlanEventHandlerCB_t eventHandlerCB)
             txHwQueue_SetInitializeHwBlocks(mem_map.numTxMemBlks,mem_map.numTxDescriptor);
         }
     }
-    set_finish_wlan_start();
 
-#ifdef CONFIG_WIFI_TI_CC35XX
-     ret = l2_cfg_GetStaHeSupport();
-     if (ret != WLAN_RET_CODE_OK)
-     {
-         return ret;
-     }
-     //get L2 support 5Ghz
-     {
-         extern Bool32 gL2Support5Ghz;
-         uint8_t is5GhzSupported = 0;
-         ret = l2_cfg_get5GhzSupport(&is5GhzSupported);
-         if (ret != WLAN_RET_CODE_OK)
-         {
-             return ret;
-         }
-         gL2Support5Ghz = (is5GhzSupported) ? TRUE : FALSE;
-     }
-#endif /* CONFIG_WIFI_TI_CC35XX */
+	set_finish_wlan_start();
+
+    ret = l2_cfg_GetStaHeSupport();
+    if (ret != WLAN_RET_CODE_OK)
+    {
+        return ret;
+    }
+
+    ret = l2_cfg_setDevice5GhzSupport();
+    if (ret != WLAN_RET_CODE_OK)
+    {
+        return ret;
+    }
 
     gWlanState = TRUE;
     return OSI_OK;
@@ -1030,11 +1025,13 @@ int Wlan_RoleUp(WlanRole_e roleType, void *params, unsigned long int timeout)
     int ret = 0;
     uint32_t role_bitmap;
 
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         ret = set_cond_in_process_wlan_ap_roleup();
     }
     else
+#endif
     {
         ret = set_cond_in_process_wlan_sta_roleup();
     }
@@ -1048,11 +1045,13 @@ int Wlan_RoleUp(WlanRole_e roleType, void *params, unsigned long int timeout)
     }
     ret = roleUp_Inter(roleType, params, timeout);
 
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         set_finish_wlan_ap_roleup();
     }
     else
+#endif
     {
         set_finish_wlan_sta_roleup();
     }
@@ -1066,11 +1065,13 @@ int Wlan_RoleDown(WlanRole_e roleType, unsigned long int timeout)
 
     HOOK(HOOK_WLAN_IF);
 
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         ret = set_cond_in_process_wlan_ap_roledown();
     }
     else
+#endif
     {
         ret = set_cond_in_process_wlan_sta_roledown();
     }
@@ -1083,11 +1084,13 @@ int Wlan_RoleDown(WlanRole_e roleType, unsigned long int timeout)
 
     ret = roleDown_inter(roleType, timeout);
 
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         set_finish_wlan_ap_roledown();
     }
     else
+#endif
     {
         set_finish_wlan_sta_roledown();
     }
@@ -1336,9 +1339,10 @@ int Wlan_Disconnect(WlanRole_e roleType,void* params)
 
     switch (roleType)
     {
+#ifndef TI_STA_ONLY_BUILD
     case WLAN_ROLE_AP:
     {
-        CMEWlanApRemovePeer_t *pCmdRemovePeer =  (CMEWlanApRemovePeer_t *)params; 
+        CMEWlanApRemovePeer_t *pCmdRemovePeer =  (CMEWlanApRemovePeer_t *)params;
 
         CME_PRINT_REPORT("\n\rWlan_if AP remove peer: MacAddr = %.2X:%.2X:%.2X:%.2X:%.2X:%.2X\n\r",
             pCmdRemovePeer->MacAddress[0],
@@ -1348,11 +1352,12 @@ int Wlan_Disconnect(WlanRole_e roleType,void* params)
             pCmdRemovePeer->MacAddress[4],
             pCmdRemovePeer->MacAddress[5]);
 
-        // Call the CME to start the disconnection 
+        // Call the CME to start the disconnection
         ret = CME_WlanApRemovePeer(pCmdRemovePeer);
         set_finish_wlan_disconnect();
     }
     break;
+#endif
     default:
         ret = CME_WlanDisconnect(TRUE);
     }
@@ -1493,6 +1498,7 @@ int Wlan_Get(WlanGet_e wlanGetType, void *params)
         case WLAN_GET_CALIBRATOR_RX_STATS:
         case WLAN_GET_CALIBRATOR_TX_PARAMS:
         case WLAN_GET_CALIBRATOR_BEACON_RSSI:
+        case WLAN_GET_CALIBRATOR_TEMPERATURE:
         {
             CalibratorCommandWrapper_t *calibratorCommand = (CalibratorCommandWrapper_t *)params;
             ret = ctrlCmdFw_CalibratorCommand(calibratorCommand->calibratorAction, calibratorCommand->calibratorCommandParams);
@@ -1557,11 +1563,12 @@ int Wlan_Get(WlanGet_e wlanGetType, void *params)
 			ret = 0;
         }
         break;
+#ifndef TI_STA_ONLY_BUILD
         case WLAN_GET_P2P_CONFIG_CHANNEL_PARAMS:
         {
             WlanP2pConfigChannelParam_t *pP2pConfigParam = (WlanP2pConfigChannelParam_t *)params;
             const P2pParameters_t *pP2pParameters;
-            
+
             if(cfgGetP2pParameters(&pP2pParameters))
             {
                 pP2pConfigParam->operChannel = pP2pParameters->p2pOperChannel;
@@ -1577,6 +1584,7 @@ int Wlan_Get(WlanGet_e wlanGetType, void *params)
             }
         }
         break;
+#endif
         case WLAN_GET_ANT_DIV_STATUS:
         {
             ret = ctrlCmdFw_GetAntennaStatus((uint8_t *)params);
@@ -1630,6 +1638,13 @@ int Wlan_Get(WlanGet_e wlanGetType, void *params)
         {
             ret = regulatoryDomain_GetCustomDomainEntry(params);
         }
+        break;
+
+        case WLAN_GET_TX_POWER:
+        {
+            ret = CME_GetTxPower(params);
+        }
+
         break;
 
         default:
@@ -1739,6 +1754,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         case WLAN_SET_CALIBRATOR_CHANNEL_TUNE:
         case WLAN_SET_CALIBRATOR_TX_START:
         case WLAN_SET_CALIBRATOR_TX_TONE_START:
+        case WLAN_SET_CALIBRATOR_TX_TONE_STOP:
         case WLAN_SET_CALIBRATOR_TX_STOP:
         case WLAN_SET_CALIBRATOR_START_RX:
         case WLAN_SET_CALIBRATOR_STOP_RX:
@@ -1757,6 +1773,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         case WLAN_SET_CALIBRATOR_LINK_ADAPT:
         case WLAN_SET_CALIBRATOR_MANUAL_CALIBRATION:
         case WLAN_SET_CALIBRATOR_THERMAL_CFG:
+        case WLAN_SET_CALIBRATOR_LINK_ROBUSTNESS_BITMAP:
         {
             CalibratorCommandWrapper_t *calibratorCommand = (CalibratorCommandWrapper_t *)params;
             ret = ctrlCmdFw_CalibratorCommand(calibratorCommand->calibratorAction, calibratorCommand->calibratorCommandParams);
@@ -1799,6 +1816,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             }
         }
         break;
+#ifndef TI_STA_ONLY_BUILD
         case WLAN_SET_PEER_AGING_TIMEOUT:
         {
 
@@ -1833,6 +1851,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             CME_setPeerAgingTimeout(SetStaAging->peerAgingTimeoutMs);
         }
         break;
+#endif
         case WLAN_SET_SCAN_DWELL_TIME:
         {
             ret = CME_SetScanDwellTime((WlanScanDwellTime_t *)params);
@@ -1850,20 +1869,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         break;
         case WLAN_SET_TX_CTRL:
         {
-            /*
-            WlanCtrlBlk_t *pCtrlBlk =  (WlanCtrlBlk_t *)params;
-            txCtrl_t *pTxCtrl;
-            pTxCtrl = os_malloc(sizeof(txCtrl_t));
-            pTxCtrl->pUdata = os_malloc(sizeof(TUdata));
-
-            pTxCtrl->pUdata->udataparams.TxSendPaceThresh = pCtrlBlk->TxSendPaceThresh;
-            pTxCtrl->pUdata->udataparams.TxSendPaceTimeoutMsec = pCtrlBlk->TxSendPaceTimeoutMsec;
-            pTxCtrl->tBackpressure.TransmitQOnTxComplete = pCtrlBlk->TransmitQOnTxComplete;
-
-            txCtrlBlk_Set(pTxCtrl);
-            os_free(pTxCtrl->pUdata);
-            os_free(pTxCtrl);
-            */
+            //obsolete
         }
         break;
 
@@ -1876,7 +1882,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         }
         break;
 
-
+#ifndef TI_STA_ONLY_BUILD
         case WLAN_SET_EXT_P2P_BUILD_ACTION_FRAME:
         {
             WlanBuildActionBuffer_t* pActionBuff = (WlanBuildActionBuffer_t *)params;
@@ -1894,7 +1900,7 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             }
         }
         break;
-
+#endif
         case WLAN_SET_EXT_OFFCHANNEL_ROC:
         {
 
@@ -1951,8 +1957,19 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
 
         case WLAN_SET_STA_WIFI_BAND:
         {
-            scanResultTable_GetCmeScanDbPointer()->wifi_band_cfg = *(uint8_t *)params;
-            l2_StorePhyConfig(scanResultTable_GetCmeScanDbPointer()->wifi_band_cfg);
+            /* Allow changes only if role is down. It doesn't make sense otherwise */
+            role_bitmap = CME_GetStartedRoleBitmap();
+            if (role_bitmap & BIT_x(ROLE_STA))
+            {
+                ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                                WLAN_ERROR_MODULE__COMMANDS,
+                                WLAN_ERROR_TYPE__WLAN_SET_ROLE_IS_UP);
+            }
+            else
+            {
+                scanResultTable_GetCmeScanDbPointer()->wifi_band_cfg = *(uint8_t *)params;
+                l2_StorePhyConfig(scanResultTable_GetCmeScanDbPointer()->wifi_band_cfg);
+            }
         }
         break;
 
@@ -2003,6 +2020,12 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         }
         break;
 
+        case WLAN_SET_TX_POWER:
+        {
+            ret = CME_SetTxPower(params);
+        }
+        break;
+
         case WLAN_SET_WIRELESS_PROTOCOL:
         {
             l2_StoreWirelessProto(*(uint8_t *)params);
@@ -2015,12 +2038,14 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
 	    }
 	    break;
 
+#ifndef TI_STA_ONLY_BUILD
         case WLAN_SET_P2P_CMD:
         {
             WlanP2pCmd_t *pP2pCmdParam = (WlanP2pCmd_t *)params;
             ret = CME_SetP2pCmd(pP2pCmdParam);
         }
         break;
+#endif
         case WLAN_SET_SCAN_RESULTS_SIZE:
         {
             scanResultTable_GetCmeScanDbPointer()->mNumDigestResultsMax = *(uint16_t *)params;
@@ -2088,6 +2113,21 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             }
             
             l2_cfg_Dynamic_set(L2_AC_PS_MODE, (uint8_t *)&acPsMode);
+        }
+        break;
+
+        case WLAN_SET_UAPSD_MAX_SP_LEN:
+        {
+            uint8_t maxSpLen = *(uint8_t *)params;
+
+            if (maxSpLen > 3)
+            {
+                ret = WlanError(WLAN_ERROR_SEVERITY__MID,
+                                WLAN_ERROR_MODULE__COMMANDS,
+                                WLAN_ERROR_TYPE__FW_RESPONSE_INVALID_PARAM);
+                break;
+            }
+            l2_cfg_Dynamic_set(L2_MAX_SP_LEN, &maxSpLen);
         }
         break;
 
@@ -2431,6 +2471,7 @@ int wlanDispatcherSendEvent(uint16_t opcode, uint8_t *args, uint16_t argsLen)
             //no argument
         }
         break;
+#ifndef TI_STA_ONLY_BUILD
         case WLAN_EVENT_P2P_GROUP_STARTED:
         {
             set_finish_wlan_connect();
@@ -2466,6 +2507,7 @@ int wlanDispatcherSendEvent(uint16_t opcode, uint8_t *args, uint16_t argsLen)
             set_finish_wlan_connect();
         }
         break;
+#endif
         case WLAN_EVENT_PEER_AGING:
         {
             pWlanEvent->Data.peerAging.inactiveTime = ((WlanEventPeerAging_t *)args)->inactiveTime;
@@ -2516,11 +2558,12 @@ int wlanDispatcherSendEvent(uint16_t opcode, uint8_t *args, uint16_t argsLen)
     return 0;
 }
 
+#ifndef TI_STA_ONLY_BUILD
 int32_t wlanValidateApParams(RoleUpApCmd_t *pApParams)
 {
-    
-    if(pApParams->ssid == NULL || 
-        (strlen((const char *)pApParams->ssid) == 0) || 
+
+    if(pApParams->ssid == NULL ||
+        (strlen((const char *)pApParams->ssid) == 0) ||
         (strlen((const char *)pApParams->ssid) > WLAN_SSID_MAX_LENGTH))
     {
         return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__COMMANDS, WLAN_ERROR_TYPE__INVALID_PARAM_NAME);
@@ -2529,7 +2572,7 @@ int32_t wlanValidateApParams(RoleUpApCmd_t *pApParams)
     if ((pApParams->secParams.Type == WLAN_SEC_TYPE_WPA2_WPA3) ||
         (pApParams->secParams.Type == WLAN_SEC_TYPE_WPA3))
     {
-        //WPA3 SAE only and WPA3 Transition mode 
+        //WPA3 SAE only and WPA3 Transition mode
         //According IEEE802.11-2020 - Defines 8-63 char passphrase
         //WFA Spec V3.1 explicitly states transition mode must use passphrase (not 64-hex PSK) &
         //SAE Alg requieres passphrase input, not pre-computetd PSK
@@ -2544,6 +2587,7 @@ int32_t wlanValidateApParams(RoleUpApCmd_t *pApParams)
 
     return WLAN_RET_CODE_OK;
 }
+#endif // TI_STA_ONLY_BUILD
 
 
 int roleUp_Inter(WlanRole_e roleType, void *params, unsigned long int timeout)
@@ -2624,13 +2668,19 @@ int roleUp_Inter(WlanRole_e roleType, void *params, unsigned long int timeout)
                 }
             }
 
+#ifndef TI_STA_ONLY_BUILD
             ret = wlanValidateApParams(params);
             if (ret < 0)
             {
                 goto fail;
             }
 
-            CME_SetApParams(params);
+            ret = CME_SetApParams(params);
+            if (ret < 0)
+            {
+                goto fail;
+            }
+#endif
         }
 
         role_bitmap |= (uint32_t)BIT_x(ROLE_AP);

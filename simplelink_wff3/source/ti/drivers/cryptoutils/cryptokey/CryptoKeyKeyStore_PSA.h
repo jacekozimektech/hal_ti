@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2026, Texas Instruments Incorporated
+ * Copyright (c) 2022-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -107,7 +107,8 @@
 #include <ti/devices/DeviceFamily.h>
 
 #if (TFM_ENABLED == 0) || defined(TFM_BUILD) /* TFM_BUILD indicates this is a TF-M build */
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         #include <third_party/mbedtls/include/psa/crypto.h>
         #include <third_party/mbedtls/include/psa/crypto_extra.h>
         #include <third_party/mbedtls/include/mbedtls/private_access.h>
@@ -119,8 +120,10 @@
         #include <third_party/mbedtls/ti/driver/ti_sl_transparent_driver_entrypoints.h>
     #else
         #error "Unsupported DeviceFamily_Parent for CryptoKeyKeyStore_PSA"
-    #endif /* #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
-              DeviceFamily_PARENT_CC35XX)) */
+    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
+            * DeviceFamily_PARENT_CC35XX)                                                    \
+            * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                         \
+            */
 #else
     #include <third_party/tfm/interface/include/psa/crypto.h>
 #endif /* #if (TFM_ENABLED == 0) || defined(TFM_BUILD) */
@@ -586,6 +589,14 @@ typedef psa_algorithm_t KeyStore_PSA_Algorithm;
 #define KEYSTORE_PSA_ALG_SHA_512_224 ((KeyStore_PSA_Algorithm)PSA_ALG_SHA_512_224)
 /** SHA2-512/256 */
 #define KEYSTORE_PSA_ALG_SHA_512_256 ((KeyStore_PSA_Algorithm)PSA_ALG_SHA_512_256)
+/** SHA3-224 */
+#define KEYSTORE_PSA_ALG_SHA3_224    ((KeyStore_PSA_Algorithm)PSA_ALG_SHA3_224)
+/** SHA3-256 */
+#define KEYSTORE_PSA_ALG_SHA3_256    ((KeyStore_PSA_Algorithm)PSA_ALG_SHA3_256)
+/** SHA3-384 */
+#define KEYSTORE_PSA_ALG_SHA3_384    ((KeyStore_PSA_Algorithm)PSA_ALG_SHA3_384)
+/** SHA3-512 */
+#define KEYSTORE_PSA_ALG_SHA3_512    ((KeyStore_PSA_Algorithm)PSA_ALG_SHA3_512)
 
 /** Macro to build an HMAC algorithm */
 #define KEYSTORE_PSA_ALG_HMAC(hash_alg) ((KeyStore_PSA_Algorithm)(PSA_ALG_HMAC(hash_alg)))
@@ -1851,7 +1862,8 @@ int_fast16_t KeyStore_PSA_purgeKey(KeyStore_PSA_KeyFileId key);
  */
 int_fast16_t KeyStore_PSA_destroyKey(KeyStore_PSA_KeyFileId key);
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
 /**
  * @brief Make a copy of a key.
@@ -1944,8 +1956,9 @@ int_fast16_t KeyStore_PSA_copyKey(KeyStore_PSA_KeyFileId source_key,
                                   KeyStore_PSA_KeyAttributes *attributes,
                                   KeyStore_PSA_KeyFileId *target_key);
 
-#endif /* #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
-          DeviceFamily_PARENT_CC35XX)) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
+        */
 #ifdef __cplusplus
 }
 #endif

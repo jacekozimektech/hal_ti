@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,8 +30,20 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* NOTE: On CC27XX devices, SHA2-224 and SHA2-384 are not yet
- * supported.
+/** ============================================================================
+ *  @file       SHA2XXF3HSM.h
+ *
+ *  @brief      SHA2 driver implementation for the XXF3 HSM family
+ *
+ *  @note On CC27XX/CC23X1 devices, SHA2-224 and SHA2-384 are not yet
+ *        supported.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #SHA2_RETURN_BEHAVIOR_CALLBACK is not supported when the input
+ *  buffer is in PSRAM or external flash and the input length exceeds the input
+ *  bounce buffer size. Returns #SHA2_STATUS_UNSUPPORTED in that case.
+ *  Use #SHA2_RETURN_BEHAVIOR_BLOCKING or #SHA2_RETURN_BEHAVIOR_POLLING instead.
+ *  See #HSMXXF3_BounceBuffers.
  */
 #ifndef ti_drivers_sha2_SHA2XXF3HSM__include
 #define ti_drivers_sha2_SHA2XXF3HSM__include
@@ -95,7 +107,8 @@ typedef struct
     uint8_t mode;
     bool isOpen;
     volatile bool operationInProgress;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     bool driverCreatedKeyAsset;
 #endif
 } SHA2XXF3HSM_Object;

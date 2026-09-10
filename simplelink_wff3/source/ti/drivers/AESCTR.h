@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2024, Texas Instruments Incorporated
+ * Copyright (c) 2018-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -903,6 +903,7 @@ int_fast16_t AESCTR_setupDecrypt(AESCTR_Handle handle, const CryptoKey *key, con
  *  @retval #AESCTR_STATUS_RESOURCE_UNAVAILABLE     The required hardware
  *                                                  resource was not available.
  *                                                  Try again later.
+ *  @retval #AESCTR_STATUS_FEATURE_NOT_SUPPORTED    The requested operation is not supported by this implementation.
  *  @retval #AESCTR_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @post   #AESCTR_addData() or #AESCTR_finalize()
@@ -932,6 +933,7 @@ int_fast16_t AESCTR_addData(AESCTR_Handle handle, AESCTR_SegmentedOperation *ope
  *  @retval #AESCTR_STATUS_RESOURCE_UNAVAILABLE     The required hardware
  *                                                  resource was not available.
  *                                                  Try again later.
+ *  @retval #AESCTR_STATUS_FEATURE_NOT_SUPPORTED    The requested operation is not supported by this implementation.
  *  @retval #AESCTR_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  */
 int_fast16_t AESCTR_finalize(AESCTR_Handle handle, AESCTR_SegmentedOperation *operation);
@@ -977,6 +979,7 @@ void AESCTR_SegmentedOperation_init(AESCTR_SegmentedOperation *operation);
  *  @retval #AESCTR_STATUS_SUCCESS               The operation succeeded.
  *  @retval #AESCTR_STATUS_ERROR                 The operation failed.
  *  @retval #AESCTR_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
+ *  @retval #AESCTR_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *  @retval #AESCTR_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @sa     #AESCTR_oneStepDecrypt()
@@ -997,6 +1000,7 @@ int_fast16_t AESCTR_oneStepEncrypt(AESCTR_Handle handle, AESCTR_OneStepOperation
  *  @retval #AESCTR_STATUS_SUCCESS               The operation succeeded.
  *  @retval #AESCTR_STATUS_ERROR                 The operation failed.
  *  @retval #AESCTR_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
+ *  @retval #AESCTR_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *  @retval #AESCTR_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
  *
  *  @sa     AESCTR_oneStepEncrypt()

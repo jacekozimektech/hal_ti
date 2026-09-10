@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -81,6 +81,15 @@
  *  !!!!!!!!!!!!! WARNING !!!!!!!!!!!!!
  *  The HSM HW engine is configured and initialized with the Samples Per Cycle value set to 19390
  *  and Mix Cycles value set to 15. This value is not available for the customer to configure.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #TRNG_RETURN_BEHAVIOR_CALLBACK is not supported when the output
+ *  buffer is in PSRAM and the requested size is a non-zero multiple of 256
+ *  bytes. Returns #TRNG_STATUS_UNSUPPORTED in that case.
+ *  Requests smaller than 256 bytes always support callback mode regardless of
+ *  output buffer location. Use #TRNG_RETURN_BEHAVIOR_BLOCKING or
+ *  #TRNG_RETURN_BEHAVIOR_POLLING for larger PSRAM output operations.
+ *  See #HSMXXF3_BounceBuffers.
  */
 
 #ifndef ti_drivers_TRNG_TRNGXXF3HSM__include
@@ -134,6 +143,13 @@ extern "C" {
 #define TRNG_STATUS_INVALID_KEY_ENCODING ((int_fast16_t)(TRNG_STATUS_RESERVED - 2))
 
 /*!
+ * @brief   The requested operation or configuration is not supported.
+ *
+ *  See the CC35XX section in #TRNGXXF3HSM.h for conditions and alternatives.
+ */
+#define TRNG_STATUS_UNSUPPORTED ((int_fast16_t)(TRNG_STATUS_RESERVED - 3))
+
+/*!
  *  @brief  Enum for the NRBG engine type
  */
 typedef enum
@@ -174,7 +190,7 @@ typedef struct
 
 /*! \endcond */
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*!
  *  @brief   Reseed the HSM IP DRBG engine
  *
@@ -236,7 +252,8 @@ extern int_fast16_t TRNGXXF3HSM_reseedHSMAsync();
  *  @sa     TRNG_open()
  */
 extern int_fast16_t TRNGXXF3HSM_switchNrbgMode(TRNG_Handle handle, TRNGXXF3HSM_NRBGMode nrbgMode);
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 #ifdef __cplusplus
 }

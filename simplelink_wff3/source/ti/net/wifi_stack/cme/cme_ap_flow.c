@@ -30,6 +30,8 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef TI_STA_ONLY_BUILD
+
 #include <inc_common_fw/cc3xxx_public_types.h>
 #include "osi_kernel.h"
 #include "common.h"
@@ -54,6 +56,7 @@
 #include "wpa_supplicant/config.h"
 #include "p2p/p2p_i.h"
 #include "drv_ti_internal.h"
+#include "errors.h"
 
 // ============================================================================
 //      External Functions
@@ -106,6 +109,9 @@ Cme_AP_states_e gCmeApFlowState_ull  = CME_AP_DISABLED_STATE;
 // Handed to supplicant in wpa_supplicant_create_ap, must remain vaild as long
 // as the AP interface is up as supplicant points to this memory.
 struct wpa_ssid gCmeSsid;
+
+// Store configured AP TX power for Country IE 
+int8_t gCmeConfiguredApTxPower = WLAN_MAX_TX_POWER_DBM;
 
 // counter of connected peers in case of AP role
 uint8_t gCmeConnectedLinksCount; //MEM_REGION_GLX
@@ -221,6 +227,11 @@ int CmeApAnyConnectedLinks()
     return gCmeConnectedLinksCount;
 }
 
+int8_t CmeGetConfiguredApTxPower(void)
+{
+    return gCmeConfiguredApTxPower;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  AP FLOW STATE MACHINE HANDLERS
@@ -233,6 +244,18 @@ void CmeApInit(Cme_Users_e __user)
 #if 0 //RazB: need to implement
     CME_PrivateIeAndBwListCreate();
 #endif
+    /* Reject AP start if a P2P group is already active.
+    * AP role shares driver globals and MAC slots with P2P GO and CL
+    * and cannot coexist with either.
+    */
+    if (CmeGetP2pGroupRoleType() != NOT_IN_GROUP)
+    {
+        CME_PRINT_REPORT_ERROR("\n\rCME ERROR! CmeApInit rejected - P2P group is active (group role=%d)",
+                                CmeGetP2pGroupRoleType());
+        g_signal_role_change_state_done.cme_signalWhenRoleStateChanged_status = CME_SIGNAL_ROLE_CHNGE_STATUS_FAILED;
+
+        return;
+    }
 
     CME_generalSemaphoreCreate();
 
@@ -346,6 +369,14 @@ int32_t setApSecurityParams (WlanSecParams_t*  pWlanSecConfig, int saePwe, struc
             break;
         case CME_SEC_TYPE_WPA2_WPA3:
 
+            if (l2_cfg_isMixedModeSupported() == FALSE)
+            {
+                CME_PRINT_REPORT("\n\rCan't start AP role with WPA2/WPA3 mixed "
+                                 "mode security since it's not supported");
+                rc = -1;
+                break;
+            }
+
             if ((pWlanSecConfig->KeyLen < WPA_HEX_PASSPHRASE_LENGTH ) 
                 && (pWlanSecConfig->KeyLen >= WPA_HEX_MIN_PASSPHRASE_LENGTH ))
             {
@@ -375,7 +406,7 @@ int32_t setApSecurityParams (WlanSecParams_t*  pWlanSecConfig, int saePwe, struc
     return rc;
 }
 
-void CmeSetApParams(void *apParams)
+int CmeSetApParams(void *apParams)
 {
     RoleUpApCmd_t *pParams = (RoleUpApCmd_t *)apParams;
     int freq;
@@ -412,13 +443,45 @@ void CmeSetApParams(void *apParams)
     }
 
     gCmeSsid.frequency = freq;
+    gCmeConfiguredApTxPower = pParams->tx_pow;
 
     gCmeSsid.beacon_int = apCfg->beaconIntervalTU;
     gCmeSsid.dtim_period = apCfg->dtimInterval;
-    gCmeSsid.ap_max_inactivity = 300;
+    /* Set AP station inactivity timeout */
+    if (pParams->apMaxInactivity != 0)
+    {
+        gCmeSsid.ap_max_inactivity = pParams->apMaxInactivity;
+    }
+    else
+    {
+        gCmeSsid.ap_max_inactivity = 300;  /* Default: 300 seconds (5 minutes) */
+    }
     //indicates ht is enabled for supplicant
 
     gCmeSsid.ht = cfgIs11nEnabled();
+
+    // Set AP SAE related configurations
+    if ((pParams->sae_pwe != 0) && (pParams->sae_pwe != 1) && (pParams->sae_pwe != 2))
+    {
+        sae_pwe = CME_AP_WPA_SAE_PWE_H2E_AND_HUNTING_AND_PECKING;
+    }
+    else
+    {
+        sae_pwe = pParams->sae_pwe;
+    }
+
+    // Set security Params
+    if (setApSecurityParams(&pParams->secParams, sae_pwe, &gCmeSsid) < 0)
+    {
+        CME_PRINT_REPORT_ERROR("\n\rFailed setting AP security");
+        os_free(gCmeSsid.ssid);
+        os_memset((void *)&gCmeSsid, 0, sizeof(struct wpa_ssid));
+        gCmeConfiguredApTxPower = WLAN_MAX_TX_POWER_DBM;
+
+        return WlanError(WLAN_ERROR_SEVERITY__LOW,
+                         WLAN_ERROR_MODULE__CME,
+                         WLAN_ERROR_TYPE__INVALID_PARAM_SEC_TYPE);
+    }
 
     if(cfgGetApMaxNumStationsFromConfIni() < pParams->sta_limit)
     {
@@ -426,10 +489,9 @@ void CmeSetApParams(void *apParams)
         CME_PRINT_REPORT_ERROR("\n\rWARNING! sta_limit is higher than the limit configure by the conf.ini , setting it to :%d",pParams->sta_limit);
     }
     
-    //SetAP max number of stations
+    //Set AP max number of stations
     cfgSetApMaxNumStations(pParams->sta_limit);
-    CME_PRINT_REPORT("\n\r sta_limit is set to :%d",pParams->sta_limit);
-    
+    CME_PRINT_REPORT("\n\r sta_limit is set to :%d max inactivity timeout %d (sec)",pParams->sta_limit, gCmeSsid.ap_max_inactivity);
 
     cfgSetWpsMode(pParams->wpsDisabled);
     if (pParams->wpsDisabled)
@@ -442,17 +504,6 @@ void CmeSetApParams(void *apParams)
         cfgSetWpsParameters(&(pParams->wpsParams));
     }
 
-    //Set AP SAE related configurations
-    
-    if ((pParams->sae_pwe != 0) && (pParams->sae_pwe != 1) && (pParams->sae_pwe != 2))
-    {
-        sae_pwe = CME_AP_WPA_SAE_PWE_H2E_AND_HUNTING_AND_PECKING;
-    }
-    else
-    {
-        sae_pwe = pParams->sae_pwe;
-    }
-
     gCmeSsid.transition_disable = !!pParams->transitionDisable;
 
     CME_PRINT_REPORT("\n\r Transition_disable=%d sae_anticlogging_threshold=%d\n\r",
@@ -461,13 +512,9 @@ void CmeSetApParams(void *apParams)
 
     cfgSetApSaeAntiCloggingThreshold(pParams->sae_anticlogging_threshold);
 
-    // Set security Params
-    if(setApSecurityParams(&pParams->secParams, sae_pwe, &gCmeSsid) < 0)
-    {
-        ASSERT_GENERAL(0);
-    }
-
     HOOK(HOOK_IN_CME_AP_FLOW);
+
+    return 0;
 }
 
 void freeApParams()
@@ -517,17 +564,12 @@ int32_t supplicantRunAP()
     struct wpa_global *pGlobal;
     struct wpa_interface  iface;
     struct wpa_supplicant *wpa_s;
-    ti_driver_ifData_t *pDevDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_P2PDEV));
 
-    //request to enable role AP for P2P Go  may come from p2p negotioation completion or from user
 
-    if ((pDevDrv == NULL)
-        ||  (pDevDrv->p2pConnectionStarted == 0)) 
+    if (NULL == gCmeSsid.ssid)
     {
-        if (NULL == gCmeSsid.ssid)
-        {
-            ASSERT_GENERAL(0);
-        }
+        ASSERT_GENERAL(0);
+    }
 
         // other 802.11 parameters are set taken from conf file, in add interface API;
         // if file doesn't exist supplicant gives default values.
@@ -536,9 +578,9 @@ int32_t supplicantRunAP()
 
 
         // get AP configuration and set it for the supplicant
-        GTRACE(GRP_CME, "AP cfg: Key management type: %d, Frequency %d beacon int. %d dtim %d ",
+    GTRACE(GRP_CME, "AP cfg: Key management type: %d, Frequency %d beacon int. %d dtim %d ",
             gCmeSsid.key_mgmt, gCmeSsid.frequency, gCmeSsid.beacon_int, gCmeSsid.dtim_period);
-    }
+    
 
     // only the first role that is started initializes supplicant
     if (NULL == gpSupplicantGlobals)
@@ -564,7 +606,6 @@ int32_t supplicantRunAP()
             return -1;
         }
 
-        pGlobal->p2p_disabled = 1;
         pGlobal->p2p = 0;
     }
     else
@@ -575,26 +616,20 @@ int32_t supplicantRunAP()
     pGlobal->p2p_disabled = gCmeSsid.mode == WPAS_MODE_AP;
 
     memset(&iface, 0, sizeof(struct wpa_interface));
-    iface.ifname = NETIF_NAME(TIWLAN_DEV_NAME_SAP);
-    iface.confname = NETIF_CONF_NAME(TIWLAN_DEV_NAME_SAP); //Configuration name (configuration is done in config_cc33xx.c)
-    iface.p2p_mgmt = 0;
-
-    if ((pDevDrv == NULL)
-        ||  (pDevDrv->p2pConnectionStarted == 0)) 
+    
+    if (gCmeSsid.mode == WPAS_MODE_P2P_GO)
     {
-        //getting here if we what to open AP or aGO
-        if (gCmeSsid.mode == WPAS_MODE_P2P_GO)
-        {
-            //we are here since it's an aGO
-            GTRACE(GRP_CME, "AP: enable p2p_mgmt=1");
-            iface.p2p_mgmt = 1;
-        }
-    }
-    else if (pDevDrv->p2pConnectionStarted == 1)
-    {
-        memset(&iface, 0, sizeof(struct wpa_interface));
+        //we are here since it's an AP aGO
+        //leaving this to support the old approach for different project
+        GTRACE(GRP_CME, "AP: enable p2p_mgmt=1");
         iface.ifname = NETIF_NAME(TIWLAN_DEV_NAME_P2P_GO);
         iface.confname = NETIF_CONF_NAME(TIWLAN_DEV_NAME_P2P_GO);
+        iface.p2p_mgmt = 1;
+    }
+    else
+    {
+        iface.ifname = NETIF_NAME(TIWLAN_DEV_NAME_SAP);
+        iface.confname = NETIF_CONF_NAME(TIWLAN_DEV_NAME_SAP); //Configuration name (configuration is done in config_cc33xx.c)
         iface.p2p_mgmt = 0;
     }
 
@@ -612,17 +647,13 @@ int32_t supplicantRunAP()
 
     drv_ti_ap_init();
 
-    if ((pDevDrv == NULL)
-        ||  (pDevDrv->p2pConnectionStarted == 0)) 
+    ret = wpa_supplicant_create_ap(wpa_s, &gCmeSsid);
+    if (ret < 0)
     {
-        ret = wpa_supplicant_create_ap(wpa_s, &gCmeSsid);
-        if (ret < 0)
-        {
-            CME_PRINT_REPORT_ERROR("\n\rwpa_supplicant_create_ap() failed");
-            supplicantDeinitAP(pGlobal, wpa_s,
+        CME_PRINT_REPORT_ERROR("\n\rwpa_supplicant_create_ap() failed");
+        supplicantDeinitAP(pGlobal, wpa_s,
                                gpSupplicantGlobals == NULL ? 1 : 0);
-            return ret;
-        }
+        return ret;
     }
 
     if (NULL == gpSupplicantGlobals)
@@ -911,3 +942,5 @@ void CME_peer_aging_timer_stop(OsiTimer_t* osTimer)
     osTimer->osTimerHandler = NULL;
 
 }
+
+#endif

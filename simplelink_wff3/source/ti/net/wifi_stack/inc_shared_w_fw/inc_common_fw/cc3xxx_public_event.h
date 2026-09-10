@@ -299,7 +299,7 @@ typedef struct
     uint8_t Bssid[WLAN_BSSID_LENGTH];
     uint8_t SsidLen;
     int8_t  Rssi;
-    int16_t SecurityInfo;
+    int32_t SecurityInfo;
     uint8_t Channel;
     char    Reserved[1];
 }WlanNetworkEntry_t;

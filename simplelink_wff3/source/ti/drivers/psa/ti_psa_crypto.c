@@ -1,6 +1,6 @@
 /*
  *  Copyright The Mbed TLS Contributors
- *  Copyright 2022-2026, Texas Instruments Incorporated
+ *  Copyright (c) 2022-2026 Texas Instruments Incorporated
  *  SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -79,7 +79,8 @@
     #include <ti/drivers/eddsa/EDDSACC26X2.h>
     #include <ti/drivers/sha2/SHA2CC26X2.h>
     #include <ti/drivers/trng/TRNGCC26XX.h>
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     #include <ti/drivers/aescbc/AESCBCXXF3.h>
     #include <ti/drivers/aesccm/AESCCMXXF3.h>
     #include <ti/drivers/aescmac/AESCMACXXF3.h>
@@ -91,6 +92,10 @@
     #include <ti/drivers/eddsa/EDDSAXXF3HSM.h>
     #include <ti/drivers/rng/RNGXXF3HSM.h>
     #include <ti/drivers/sha2/SHA2XXF3HSM.h>
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        #include <ti/drivers/SHA3.h>
+        #include <ti/drivers/sha3/SHA3XXF3HSM.h>
+    #endif
 
     #include <ti/drivers/cryptoutils/utils/CryptoUtils.h>
     #include <ti/drivers/cryptoutils/hsm/HSMXXF3.h>
@@ -147,7 +152,8 @@ static uint8_t keyAlgorithmsLength = 0;
 static uint8_t localBuf[PSA_OUTPUT_BUF_SIZE] __attribute__((aligned(4)));
 
 #ifdef ENABLE_TI_CRYPTO_RNG
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /* Buffer used to byte-swap ECC curve order for key generation */
 static uint8_t curveOrder[PSA_BITS_TO_BYTES(PSA_ECC_MAX_CURVE_BITS)] __attribute__((aligned(4)));
     #endif
@@ -166,6 +172,15 @@ bool psa_crypto_ns_caller = false;
     ((alg == PSA_ALG_SHA_224 || alg == PSA_ALG_SHA_256)   ? 1 \
      : (alg == PSA_ALG_SHA_384 || alg == PSA_ALG_SHA_512) ? 1 \
                                                           : 0)
+
+/**
+ * Returns 1 if the algorithm is SHA3,
+ * Otherwise, returns 0.
+ */
+#define PSA_ALG_IS_SHA3(alg)                                    \
+    ((alg == PSA_ALG_SHA3_224 || alg == PSA_ALG_SHA3_256)   ? 1 \
+     : (alg == PSA_ALG_SHA3_384 || alg == PSA_ALG_SHA3_512) ? 1 \
+                                                            : 0)
 
 typedef enum
 {
@@ -201,7 +216,8 @@ typedef enum
     #define SHA2_Object    SHA2CC26X2_Object
     #define TRNG_Object    TRNGCC26XX_Object
 
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
     #define AESCBC_Object  AESCBCXXF3_Object
     #define AESCCM_Object  AESCCMXXF3_Object
@@ -214,9 +230,30 @@ typedef enum
     #define EDDSA_Object   EDDSAXXF3HSM_Object
     #define RNG_Object     RNGXXF3HSM_Object
     #define SHA2_Object    SHA2XXF3HSM_Object
+    #define TRNG_Object    TRNGXXF3HSM_Object
 
 #else
     #error "Device family not supported"
+#endif
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* On CC35XX the HSM can only access internal RAM. If the driver objects are
+     * placed in external RAM, and the HSM need to access data in the driver objects
+     * then the data need to first be copied to internal RAM. To prevent this,
+     * the driver objects will be placed in internal RAM.
+     * Note, user input/output data can still be placed in external RAM, and the
+     * drivers will then copy the data to/from internal RAM to handle this.
+     */
+    #define TI_PSA_OBJECT_ATTR __attribute__((section(".internalRAM.bss")))
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X2_CC26X2) ||                                               \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X1_CC26X1) ||                                                 \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4) ||                                          \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    /* No attributes needed. */
+    #define TI_PSA_OBJECT_ATTR
+#else
+    #error "Device family not currently supported"
 #endif
 
 /* SimpleLink crypto driver config structs and their associated device-specific
@@ -225,7 +262,7 @@ typedef enum
 #if defined(ENABLE_TI_CRYPTO_TRNG)
 static TRNG_Handle trngHandle = NULL;
 static TRNG_Config trngConfig;
-static TRNG_Object trngObject;
+static TRNG_Object trngObject TI_PSA_OBJECT_ATTR;
 #endif
 
 #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X2_CC26X2) || \
@@ -284,7 +321,8 @@ static SHA2CC26X2_HWAttrs sha2HWAttrs = {.intPriority = (~0)};
 static TRNGCC26XX_HWAttrs trngHWAttrs = {.intPriority = (~0), .swiPriority = 0, .samplesPerCycle = 240000};
     #endif
 
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
     #ifdef ENABLE_TI_CRYPTO_AESCBC
 static const AESCBCXXF3_HWAttrs aescbcHWAttrs     = {.intPriority = (~0)};
@@ -329,6 +367,10 @@ static RNGXXF3HSM_HWAttrs rngHWAttrs              = {.reserved1 = 0};
 
     #ifdef ENABLE_TI_CRYPTO_SHA2
 static SHA2XXF3HSM_HWAttrs sha2HWAttrs            = {.reserved1 = 0};
+    #endif
+
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+static SHA3XXF3HSM_HWAttrs sha3HWAttrs            = {.reserved1 = 0};
     #endif
 
 #else
@@ -383,7 +425,8 @@ extern PSACrypto_s_SecureCallback *PSACrypto_s_secureCB;
 
 #endif /* TFM_ENABLED */
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
 /* Externs for KeyMgmt functions */
 extern psa_status_t KeyMgmt_psa_copy_key(mbedtls_svc_key_id_t source_key,
@@ -434,7 +477,8 @@ extern psa_status_t KeyMgmt_psa_key_derivation_verify_key(KeyMgmt_psa_key_deriva
 extern psa_status_t KeyMgmt_psa_key_derivation_abort(KeyMgmt_psa_key_derivation_operation_t *operation);
 
 extern psa_status_t tfm_its_init(void);
-#endif /* ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)) \
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
         */
 
 /* Forward declarations */
@@ -1147,7 +1191,8 @@ static RNG_Handle psa_rng_construct(RNG_Config *rngConfig, RNG_Object *rngObject
     }
     else
     {
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         /* RNG_construct() will return NULL if RNG_RETURN_BEHAVIOR_CALLBACK is
          * specified so set to polling to match SysConfig default.
          */
@@ -1155,7 +1200,10 @@ static RNG_Handle psa_rng_construct(RNG_Config *rngConfig, RNG_Object *rngObject
     #else
         rngParams.returnBehavior = RNG_RETURN_BEHAVIOR_CALLBACK;
         #error "Callback function must be implemented"
-    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
+            * DeviceFamily_PARENT_CC35XX)                                                    \
+            * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                         \
+            */
     }
 
     memset(rngObject, 0x0, sizeof(RNG_Object));
@@ -1266,6 +1314,67 @@ static psa_status_t psa_set_sha2_hash_type(SHA2_Handle sha2Handle, psa_algorithm
     return status;
 }
 #endif
+
+#ifdef ENABLE_TI_CRYPTO_SHA3
+/*
+ *  ======== psa_sha3_construct ========
+ */
+static SHA3_Handle psa_sha3_construct(SHA3_Config *sha3Config, SHA3XXF3HSM_Object *sha3Object)
+{
+    SHA3_Params sha3Params;
+
+    SHA3_Params_init(&sha3Params);
+    sha3Params.returnBehavior = SHA3_RETURN_BEHAVIOR_BLOCKING;
+
+    memset(sha3Object, 0x0, sizeof(SHA3XXF3HSM_Object));
+    sha3Config->object  = sha3Object;
+    sha3Config->hwAttrs = &sha3HWAttrs;
+
+    return SHA3_construct(sha3Config, &sha3Params);
+}
+
+/*
+ *  ======== psa_set_sha3_hash_type ========
+ */
+static psa_status_t psa_set_sha3_hash_type(SHA3_Handle sha3Handle, psa_algorithm_t algorithm)
+{
+    int_fast16_t ret;
+    psa_status_t status;
+
+    if (sha3Handle == NULL)
+    {
+        return PSA_ERROR_BAD_STATE;
+    }
+
+    switch (algorithm)
+    {
+        case PSA_ALG_SHA3_224:
+            ret = SHA3_setHashType(sha3Handle, SHA3_HASH_TYPE_224);
+            break;
+
+        case PSA_ALG_SHA3_256:
+            ret = SHA3_setHashType(sha3Handle, SHA3_HASH_TYPE_256);
+            break;
+
+        case PSA_ALG_SHA3_384:
+            ret = SHA3_setHashType(sha3Handle, SHA3_HASH_TYPE_384);
+            break;
+
+        case PSA_ALG_SHA3_512:
+            ret = SHA3_setHashType(sha3Handle, SHA3_HASH_TYPE_512);
+            break;
+
+        default:
+            ret = SHA3_STATUS_ERROR;
+            break;
+    }
+
+    /* SHA3 status codes are identical to SHA2 */
+    status = map_SHA2_status(ret);
+
+    return status;
+}
+#endif /* ENABLE_TI_CRYPTO_SHA3 */
 
 /******************************************************************************/
 /* Key management */
@@ -1484,7 +1593,8 @@ static psa_status_t psa_key_attributes_usage_check(psa_key_attributes_t *attribu
     return status;
 }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
 /*
  *  ======== ti_psa_destroy_key ========
@@ -1902,7 +2012,7 @@ psa_status_t ti_psa_get_key_attributes(mbedtls_svc_key_id_t key, psa_key_attribu
 void ti_psa_reset_key_attributes(psa_key_attributes_t *attributes)
 {
     #if (TFM_ENABLED == 1)
-    (void)memset(attributes, 0, sizeof(*attributes));
+    *attributes = KEYSTORE_PSA_KEY_ATTRIBUTES_INIT;
     #else
     KeyStore_PSA_resetKeyAttributes(attributes);
     #endif
@@ -2114,7 +2224,8 @@ psa_status_t psa_copy_key(mbedtls_svc_key_id_t source_key,
 
     #error "Key Management functions not supported for this device"
 
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC235X) \
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
         */
 
 /******************************************************************************/
@@ -2222,7 +2333,8 @@ psa_status_t ti_psa_hash_resume(psa_hash_operation_t *psa_operation,
             (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4)
     SHA2CC26X2_Object *object          = (SHA2CC26X2_Object *)operation->sha2Config.object;
         #elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
-               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     SHA2XXF3HSM_Object *object = (SHA2XXF3HSM_Object *)operation->sha2Config.object;
         #else
             #error "Device family not supported"
@@ -2334,7 +2446,8 @@ psa_status_t ti_psa_hash_suspend(psa_hash_operation_t *psa_operation,
             (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4)
     SHA2CC26X2_Object *object          = (SHA2CC26X2_Object *)operation->sha2Config.object;
         #elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
-               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+               (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     SHA2XXF3HSM_Object *object = (SHA2XXF3HSM_Object *)operation->sha2Config.object;
         #else
             #error "Device family not supported"
@@ -2359,7 +2472,9 @@ psa_status_t ti_psa_hash_suspend(psa_hash_operation_t *psa_operation,
          * support hash suspend/resume which limits the amount of unprocessed input
          * to (block_size - 1) bytes.
          */
-        #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+        #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+             (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+             (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if (object->bytesInBuffer == PSA_HASH_BLOCK_LENGTH(alg))
     {
         if (operation->sha2Object.isOpen == false)
@@ -2426,7 +2541,7 @@ psa_status_t ti_psa_hash_suspend(psa_hash_operation_t *psa_operation,
  */
 psa_status_t ti_psa_hash_abort(psa_hash_operation_t *psa_operation)
 {
-#ifndef ENABLE_TI_CRYPTO_SHA2
+#if !defined(ENABLE_TI_CRYPTO_SHA2) && !defined(ENABLE_TI_CRYPTO_SHA3)
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     ti_psa_hash_operation_t *operation = &psa_operation->MBEDTLS_PRIVATE(ctx).ti_ctx;
@@ -2437,19 +2552,39 @@ psa_status_t ti_psa_hash_abort(psa_hash_operation_t *psa_operation)
         return PSA_SUCCESS;
     }
 
-    if (operation->sha2Object.isOpen == false)
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+    if (PSA_ALG_IS_SHA2(operation->alg))
     {
-        return PSA_ERROR_BAD_STATE;
+        if (operation->sha2Object.isOpen == false)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+        SHA2_close((SHA2_Handle)&operation->sha2Config);
+    }
+    else
+    #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(operation->alg))
+    {
+        if (operation->sha3Object.isOpen == false)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+        SHA3_close((SHA3_Handle)&operation->sha3Config);
+    }
+    else
+    #endif
+    {
+        return PSA_ERROR_NOT_SUPPORTED;
     }
 
-    /* Close the SHA2 handle - after any operation is aborted, it must be 'setup' again.
-     * Each setup call re-constructs the handle.
+    /* After any operation is aborted, it must be 'setup' again. Each setup call
+     * re-constructs the handle.
      */
-    SHA2_close((SHA2_Handle)&operation->sha2Config);
     *operation = TI_PSA_HASH_OPERATION_INIT;
 
     return PSA_SUCCESS;
-#endif /* ENABLE_TI_CRYPTO_SHA2 */
+#endif /* !ENABLE_TI_CRYPTO_SHA2 && !ENABLE_TI_CRYPTO_SHA3 */
 }
 
 /*
@@ -2457,15 +2592,15 @@ psa_status_t ti_psa_hash_abort(psa_hash_operation_t *psa_operation)
  */
 psa_status_t ti_psa_hash_setup(psa_hash_operation_t *psa_operation, psa_algorithm_t alg)
 {
-#ifndef ENABLE_TI_CRYPTO_SHA2
+#if !defined(ENABLE_TI_CRYPTO_SHA2) && !defined(ENABLE_TI_CRYPTO_SHA3)
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     psa_status_t status                = PSA_ERROR_CORRUPTION_DETECTED;
     ti_psa_hash_operation_t *operation = &psa_operation->MBEDTLS_PRIVATE(ctx).ti_ctx;
 
-    /* Except for first call to this fuction, this function cannot be called
-     * without calling abort psa_hash_abort operation, which resets the internal
-     * buffers for SHA2.
+    /* Except for first call to this function, this function cannot be called
+     * without calling psa_hash_abort operation, which resets the internal
+     * buffers for the hash driver.
      */
 
     /* Return this error to prevent out of order execution */
@@ -2480,14 +2615,37 @@ psa_status_t ti_psa_hash_setup(psa_hash_operation_t *psa_operation, psa_algorith
         return PSA_ERROR_BAD_STATE;
     }
 
-    SHA2_Handle sha2Handle = psa_sha2_construct(&operation->sha2Config, &operation->sha2Object);
-
-    if (sha2Handle == NULL)
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+    if (PSA_ALG_IS_SHA2(alg))
     {
-        return PSA_ERROR_BAD_STATE;
-    }
+        SHA2_Handle sha2Handle = psa_sha2_construct(&operation->sha2Config, &operation->sha2Object);
 
-    status = psa_set_sha2_hash_type(sha2Handle, alg);
+        if (sha2Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        status = psa_set_sha2_hash_type(sha2Handle, alg);
+    }
+    else
+    #endif /* ENABLE_TI_CRYPTO_SHA2 */
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(alg))
+    {
+        SHA3_Handle sha3Handle = psa_sha3_construct(&operation->sha3Config, &operation->sha3Object);
+
+        if (sha3Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        status = psa_set_sha3_hash_type(sha3Handle, alg);
+    }
+    else
+    #endif /* ENABLE_TI_CRYPTO_SHA3 */
+    {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
 
     if (status == PSA_SUCCESS)
     {
@@ -2496,7 +2654,7 @@ psa_status_t ti_psa_hash_setup(psa_hash_operation_t *psa_operation, psa_algorith
     }
 
     return status;
-#endif /* ENABLE_TI_CRYPTO_SHA2 */
+#endif     /* !ENABLE_TI_CRYPTO_SHA2 && !ENABLE_TI_CRYPTO_SHA3 */
 }
 
 /*
@@ -2504,7 +2662,7 @@ psa_status_t ti_psa_hash_setup(psa_hash_operation_t *psa_operation, psa_algorith
  */
 psa_status_t ti_psa_hash_update(psa_hash_operation_t *psa_operation, const uint8_t *input, size_t input_length)
 {
-#ifndef ENABLE_TI_CRYPTO_SHA2
+#if !defined(ENABLE_TI_CRYPTO_SHA2) && !defined(ENABLE_TI_CRYPTO_SHA3)
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     int_fast16_t ret;
@@ -2529,24 +2687,36 @@ psa_status_t ti_psa_hash_update(psa_hash_operation_t *psa_operation, const uint8
     #endif
     }
 
-    /* Note: Replacing this with PSA_ALG_IS_HASH(operation->alg) is not
-     * sufficient since we only support SHA2.
-     */
-    if (!PSA_ALG_IS_SHA2(operation->alg))
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+    if (PSA_ALG_IS_SHA2(operation->alg))
+    {
+        if (operation->sha2Object.isOpen == false)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+        ret = SHA2_addData((SHA2_Handle)&operation->sha2Config, input, input_length);
+    }
+    else
+    #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(operation->alg))
+    {
+        if (operation->sha3Object.isOpen == false)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+        ret = SHA3_addData((SHA3_Handle)&operation->sha3Config, input, input_length);
+    }
+    else
+    #endif
     {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
-    if (operation->sha2Object.isOpen == false)
-    {
-        return PSA_ERROR_BAD_STATE;
-    }
-
-    ret    = SHA2_addData((SHA2_Handle)&operation->sha2Config, input, input_length);
     status = map_SHA2_status(ret);
 
     return status;
-#endif /* ENABLE_TI_CRYPTO_SHA2 */
+#endif /* !ENABLE_TI_CRYPTO_SHA2 && !ENABLE_TI_CRYPTO_SHA3 */
 }
 
 /*
@@ -2557,7 +2727,7 @@ psa_status_t ti_psa_hash_finish(psa_hash_operation_t *psa_operation,
                                 size_t hash_size,
                                 size_t *hash_length)
 {
-#ifndef ENABLE_TI_CRYPTO_SHA2
+#if !defined(ENABLE_TI_CRYPTO_SHA2) && !defined(ENABLE_TI_CRYPTO_SHA3)
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     int_fast16_t ret;
@@ -2590,9 +2760,7 @@ psa_status_t ti_psa_hash_finish(psa_hash_operation_t *psa_operation,
     {
         status = PSA_ERROR_BAD_STATE;
     }
-    /* Note: Replacing this with PSA_ALG_IS_HASH(operation->alg) is not
-     * sufficient since we only support SHA2)
-     */
+    #ifdef ENABLE_TI_CRYPTO_SHA2
     else if (PSA_ALG_IS_SHA2(operation->alg))
     {
         if (operation->sha2Object.isOpen == false)
@@ -2605,6 +2773,21 @@ psa_status_t ti_psa_hash_finish(psa_hash_operation_t *psa_operation,
             status = map_SHA2_status(ret);
         }
     }
+    #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+    else if (PSA_ALG_IS_SHA3(operation->alg))
+    {
+        if (operation->sha3Object.isOpen == false)
+        {
+            status = PSA_ERROR_BAD_STATE;
+        }
+        else
+        {
+            ret    = SHA3_finalize((SHA3_Handle)&operation->sha3Config, hash);
+            status = map_SHA2_status(ret);
+        }
+    }
+    #endif /* ENABLE_TI_CRYPTO_SHA3 */
     else
     {
         status = PSA_ERROR_NOT_SUPPORTED;
@@ -2629,7 +2812,7 @@ psa_status_t ti_psa_hash_finish(psa_hash_operation_t *psa_operation,
     #endif
 
         return status;
-#endif /* ENABLE_TI_CRYPTO_SHA2 */
+#endif /* !ENABLE_TI_CRYPTO_SHA2 && !ENABLE_TI_CRYPTO_SHA3 */
 }
 
 /*
@@ -2711,15 +2894,15 @@ psa_status_t ti_psa_hash_verify(psa_hash_operation_t *psa_operation, const uint8
 }
 
 /*
- *  ======== ti_psa_hash_compute_internal ========
+ *  ======== ti_psa_hash_compute_sha2_internal ========
  */
-static psa_status_t ti_psa_hash_compute_internal(SHA2_Handle sha2Handle,
-                                                 psa_algorithm_t alg,
-                                                 const uint8_t *input,
-                                                 size_t input_length,
-                                                 uint8_t *hash,
-                                                 size_t hash_size,
-                                                 size_t *hash_length)
+static psa_status_t ti_psa_hash_compute_sha2_internal(SHA2_Handle sha2Handle,
+                                                      psa_algorithm_t alg,
+                                                      const uint8_t *input,
+                                                      size_t input_length,
+                                                      uint8_t *hash,
+                                                      size_t hash_size,
+                                                      size_t *hash_length)
 {
 #ifndef ENABLE_TI_CRYPTO_SHA2
     return PSA_ERROR_NOT_SUPPORTED;
@@ -2785,6 +2968,79 @@ static psa_status_t ti_psa_hash_compute_internal(SHA2_Handle sha2Handle,
 #endif
 }
 
+#ifdef ENABLE_TI_CRYPTO_SHA3
+/*
+ *  ======== ti_psa_hash_compute_sha3_internal ========
+ */
+static psa_status_t ti_psa_hash_compute_sha3_internal(SHA3_Handle sha3Handle,
+                                                      psa_algorithm_t alg,
+                                                      const uint8_t *input,
+                                                      size_t input_length,
+                                                      uint8_t *hash,
+                                                      size_t hash_size,
+                                                      size_t *hash_length)
+{
+    int_fast16_t ret;
+    psa_status_t status;
+    size_t actual_hash_length = PSA_HASH_LENGTH(alg);
+
+    /* Check if operation is a hash */
+    if (!PSA_ALG_IS_HASH(alg))
+    {
+        SHA3_close(sha3Handle);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    /* Fill the output buffer with something that isn't a valid hash (barring an
+     * attack on the hash and deliberately-crafted input), in case the caller
+     * doesn't check the return status properly.
+     */
+    *hash_length = actual_hash_length;
+
+    /* If hash_size is 0 then hash may be NULL and then the call to memset would
+     * have undefined behavior.
+     */
+    if (hash_size != 0)
+    {
+        (void)memset(hash, '!', hash_size);
+    }
+
+    /* If the output length is smaller than the hash, then report user mistake
+     * for this alg that does not support a shortened hash.
+     */
+    if (hash_size < actual_hash_length)
+    {
+        SHA3_close(sha3Handle);
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    status = psa_set_sha3_hash_type(sha3Handle, alg);
+    if (status != PSA_SUCCESS)
+    {
+        SHA3_close(sha3Handle);
+        return status;
+    }
+
+    ret    = SHA3_hashData(sha3Handle, input, input_length, hash);
+    status = map_SHA2_status(ret);
+
+    /* Close temporary handle */
+    if (((SHA3XXF3HSM_Object *)sha3Handle->object)->returnBehavior == SHA3_RETURN_BEHAVIOR_CALLBACK)
+    {
+        /* Set a marker so that the secure callback knows that the SHA3_Handle can be closed, since
+         * this is a one-shot operation.
+         */
+        ((SHA3XXF3HSM_Object *)sha3Handle->object)->isOpen = false;
+    }
+    else
+    {
+        SHA3_close(sha3Handle);
+    }
+
+    return status;
+}
+#endif /* ENABLE_TI_CRYPTO_SHA3 */
+
 /*
  *  ======== ti_psa_hash_compute ========
  */
@@ -2795,6 +3051,23 @@ psa_status_t ti_psa_hash_compute(psa_algorithm_t alg,
                                  size_t hash_size,
                                  size_t *hash_length)
 {
+#ifdef ENABLE_TI_CRYPTO_SHA3
+    if (PSA_ALG_IS_SHA3(alg))
+    {
+        SHA3_Config sha3Config;
+        SHA3XXF3HSM_Object sha3Object;
+        SHA3_Handle sha3Handle = psa_sha3_construct(&sha3Config, &sha3Object);
+
+        if (sha3Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        /* This function will take care of closing the handle */
+        return ti_psa_hash_compute_sha3_internal(sha3Handle, alg, input, input_length, hash, hash_size, hash_length);
+    }
+#endif
+
 #ifndef ENABLE_TI_CRYPTO_SHA2
     return PSA_ERROR_NOT_SUPPORTED;
 #else
@@ -2810,7 +3083,7 @@ psa_status_t ti_psa_hash_compute(psa_algorithm_t alg,
     }
 
     /* This function will take care of closing the handle */
-    return ti_psa_hash_compute_internal(sha2Handle, alg, input, input_length, hash, hash_size, hash_length);
+    return ti_psa_hash_compute_sha2_internal(sha2Handle, alg, input, input_length, hash, hash_size, hash_length);
 #endif
 }
 
@@ -2857,23 +3130,52 @@ psa_status_t ti_psa_hash_compare(psa_algorithm_t alg,
          * build configuration. The return behavior set by the construct() function also depends
          * on NS/S caller in TFM-enabled builds.
          */
-        SHA2_Config sha2Config;
-        SHA2_Object sha2Object;
-        SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
-
-        if (sha2Handle == NULL)
+#ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(alg))
         {
-            return PSA_ERROR_BAD_STATE;
-        }
+            SHA3_Config sha3Config;
+            SHA3XXF3HSM_Object sha3Object;
+            SHA3_Handle sha3Handle = psa_sha3_construct(&sha3Config, &sha3Object);
 
-        /* This function will also close the handle. */
-        status = ti_psa_hash_compute_internal(sha2Handle,
-                                              alg,
-                                              input,
-                                              input_length,
-                                              actual_hash,
-                                              hash_length,
-                                              &actual_hash_length);
+            if (sha3Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            /* This function will also close the handle. */
+            status = ti_psa_hash_compute_sha3_internal(sha3Handle,
+                                                       alg,
+                                                       input,
+                                                       input_length,
+                                                       actual_hash,
+                                                       hash_length,
+                                                       &actual_hash_length);
+        }
+        else
+#endif
+        {
+#ifdef ENABLE_TI_CRYPTO_SHA2
+            SHA2_Config sha2Config;
+            SHA2_Object sha2Object;
+            SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
+
+            if (sha2Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            /* This function will also close the handle. */
+            status = ti_psa_hash_compute_sha2_internal(sha2Handle,
+                                                       alg,
+                                                       input,
+                                                       input_length,
+                                                       actual_hash,
+                                                       hash_length,
+                                                       &actual_hash_length);
+#else
+            return PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
 
         if (status != PSA_SUCCESS)
         {
@@ -2907,7 +3209,7 @@ psa_status_t ti_psa_hash_compare(psa_algorithm_t alg,
  */
 psa_status_t ti_psa_hash_clone(const psa_hash_operation_t *source_operation, psa_hash_operation_t *target_operation)
 {
-#ifndef ENABLE_TI_CRYPTO_SHA2
+#if !defined(ENABLE_TI_CRYPTO_SHA2) && !defined(ENABLE_TI_CRYPTO_SHA3)
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     psa_status_t status                                = PSA_ERROR_CORRUPTION_DETECTED;
@@ -2925,33 +3227,72 @@ psa_status_t ti_psa_hash_clone(const psa_hash_operation_t *source_operation, psa
         return PSA_ERROR_BAD_STATE;
     }
 
-    SHA2_Handle sha2Handle = psa_sha2_construct(&ti_target_operation->sha2Config, &ti_target_operation->sha2Object);
-
-    if (sha2Handle == NULL)
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+    if (PSA_ALG_IS_SHA2(ti_source_operation->alg))
     {
-        return PSA_ERROR_BAD_STATE;
+        SHA2_Handle sha2Handle = psa_sha2_construct(&ti_target_operation->sha2Config, &ti_target_operation->sha2Object);
+
+        if (sha2Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        status = psa_set_sha2_hash_type(sha2Handle, ti_source_operation->alg);
+
+        if (status == PSA_SUCCESS)
+        {
+            ti_target_operation->alg = ti_source_operation->alg;
+            ti_target_operation->id  = PSA_CRYPTO_TI_DRIVER_ID;
+            /* Copy over the contents of the prior driver object to the new one */
+            memcpy(&ti_target_operation->sha2Object, &ti_source_operation->sha2Object, sizeof(SHA2_Object));
+
+            /* Some SHA2 object members cannot be directly copied. If actual values are
+             * needed for these variables, the driver will set them up internally.
+             */
+            ti_target_operation->sha2Object.input               = NULL;
+            ti_target_operation->sha2Object.output              = NULL;
+            ti_target_operation->sha2Object.key                 = NULL;
+            ti_target_operation->sha2Object.operationInProgress = false;
+        }
     }
-
-    status = psa_set_sha2_hash_type(sha2Handle, ti_source_operation->alg);
-
-    if (status == PSA_SUCCESS)
+    else
+    #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(ti_source_operation->alg))
     {
-        ti_target_operation->alg = ti_source_operation->alg;
-        ti_target_operation->id  = PSA_CRYPTO_TI_DRIVER_ID;
-        /* Copy over the contents of the prior driver object to the new one */
-        memcpy(&ti_target_operation->sha2Object, &ti_source_operation->sha2Object, sizeof(SHA2_Object));
+        SHA3_Handle sha3Handle = psa_sha3_construct(&ti_target_operation->sha3Config, &ti_target_operation->sha3Object);
 
-        /* Some SHA2 object members cannot be directly copied. If actual values are
-         * needed for these variables, the driver will set them up internally.
-         */
-        ti_target_operation->sha2Object.input               = NULL;
-        ti_target_operation->sha2Object.output              = NULL;
-        ti_target_operation->sha2Object.key                 = NULL;
-        ti_target_operation->sha2Object.operationInProgress = false;
+        if (sha3Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        status = psa_set_sha3_hash_type(sha3Handle, ti_source_operation->alg);
+
+        if (status == PSA_SUCCESS)
+        {
+            ti_target_operation->alg = ti_source_operation->alg;
+            ti_target_operation->id  = PSA_CRYPTO_TI_DRIVER_ID;
+            /* Copy over the contents of the prior driver object to the new one */
+            memcpy(&ti_target_operation->sha3Object, &ti_source_operation->sha3Object, sizeof(SHA3XXF3HSM_Object));
+
+            /* Some SHA3 object members cannot be directly copied. If actual values are
+             * needed for these variables, the driver will set them up internally.
+             */
+            ti_target_operation->sha3Object.input               = NULL;
+            ti_target_operation->sha3Object.output              = NULL;
+            ti_target_operation->sha3Object.key                 = NULL;
+            ti_target_operation->sha3Object.operationInProgress = false;
+        }
+    }
+    else
+    #endif
+    {
+        status = PSA_ERROR_NOT_SUPPORTED;
     }
 
     return status;
-#endif /* ENABLE_TI_CRYPTO_SHA2 */
+#endif /* !ENABLE_TI_CRYPTO_SHA2 && !ENABLE_TI_CRYPTO_SHA3 */
 }
 
 /******************************************************************************/
@@ -3015,7 +3356,7 @@ static psa_status_t ti_psa_mac_setup(ti_psa_mac_operation_t *operation,
                                      psa_algorithm_t alg,
                                      bool is_sign)
 {
-#if defined(ENABLE_TI_CRYPTO_SHA2) || defined(ENABLE_TI_CRYPTO_AESCMAC)
+#if defined(ENABLE_TI_CRYPTO_SHA2) || defined(ENABLE_TI_CRYPTO_SHA3) || defined(ENABLE_TI_CRYPTO_AESCMAC)
     int_fast16_t ret;
 #endif
     psa_status_t status             = PSA_ERROR_CORRUPTION_DETECTED;
@@ -3084,9 +3425,9 @@ static psa_status_t ti_psa_mac_setup(ti_psa_mac_operation_t *operation,
     }
     else if (PSA_ALG_IS_HMAC(alg))
     {
-#ifdef ENABLE_TI_CRYPTO_SHA2
         psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(alg);
 
+#ifdef ENABLE_TI_CRYPTO_SHA2
         if (PSA_ALG_IS_SHA2(hashAlg))
         {
             SHA2_Handle sha2Handle = psa_sha2_construct(&operation->driver.sha2.sha2Config,
@@ -3116,7 +3457,27 @@ static psa_status_t ti_psa_mac_setup(ti_psa_mac_operation_t *operation,
     #endif
             }
         }
+        else
 #endif
+#ifdef ENABLE_TI_CRYPTO_SHA3
+            if (PSA_ALG_IS_SHA3(hashAlg))
+        {
+            SHA3_Handle sha3Handle = psa_sha3_construct(&operation->driver.sha3.sha3Config,
+                                                        &operation->driver.sha3.sha3Object);
+
+            status = psa_set_sha3_hash_type(sha3Handle, hashAlg);
+
+            if (status == PSA_SUCCESS)
+            {
+                ret    = SHA3_setupHmac(sha3Handle, &operation->cryptoKey);
+                status = map_SHA2_status(ret);
+            }
+        }
+        else
+#endif
+        {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
     }
     else
     {
@@ -3258,11 +3619,29 @@ psa_status_t ti_psa_mac_abort(psa_mac_operation_t *psa_operation)
     }
     else if (PSA_ALG_IS_HMAC(operation->alg))
     {
+        psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(operation->alg);
+
 #ifdef ENABLE_TI_CRYPTO_SHA2
-        /* Clear internal SHA2 buffers */
-        SHA2_reset((SHA2_Handle)&operation->driver.sha2.sha2Config);
-        status = PSA_SUCCESS;
+        if (PSA_ALG_IS_SHA2(hashAlg))
+        {
+            /* Clear internal SHA2 buffers */
+            SHA2_reset((SHA2_Handle)&operation->driver.sha2.sha2Config);
+            status = PSA_SUCCESS;
+        }
+        else
 #endif
+#ifdef ENABLE_TI_CRYPTO_SHA3
+            if (PSA_ALG_IS_SHA3(hashAlg))
+        {
+            /* Clear internal SHA3 buffers */
+            SHA3_reset((SHA3_Handle)&operation->driver.sha3.sha3Config);
+            status = PSA_SUCCESS;
+        }
+        else
+#endif
+        {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
     }
     else
     {
@@ -3435,15 +3814,37 @@ psa_status_t ti_psa_mac_update(psa_mac_operation_t *psa_operation, const uint8_t
     }
     else if (PSA_ALG_IS_HMAC(operation->alg))
     {
-#ifdef ENABLE_TI_CRYPTO_SHA2
-        if (operation->driver.sha2.sha2Object.isOpen == false)
-        {
-            return PSA_ERROR_BAD_STATE;
-        }
+        psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(operation->alg);
 
-        ret    = SHA2_addData(&operation->driver.sha2.sha2Config, input, input_length);
-        status = map_SHA2_status(ret);
+#ifdef ENABLE_TI_CRYPTO_SHA2
+        if (PSA_ALG_IS_SHA2(hashAlg))
+        {
+            if (operation->driver.sha2.sha2Object.isOpen == false)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            ret    = SHA2_addData(&operation->driver.sha2.sha2Config, input, input_length);
+            status = map_SHA2_status(ret);
+        }
+        else
 #endif
+#ifdef ENABLE_TI_CRYPTO_SHA3
+            if (PSA_ALG_IS_SHA3(hashAlg))
+        {
+            if (operation->driver.sha3.sha3Object.isOpen == false)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            ret    = SHA3_addData((SHA3_Handle)&operation->driver.sha3.sha3Config, input, input_length);
+            status = map_SHA2_status(ret);
+        }
+        else
+#endif
+        {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
     }
     else
     {
@@ -3533,24 +3934,41 @@ psa_status_t ti_psa_mac_sign_finish(psa_mac_operation_t *psa_operation,
     }
     else if (PSA_ALG_IS_HMAC(operation->alg))
     {
+        psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(operation->alg);
+
 #ifdef ENABLE_TI_CRYPTO_SHA2
-        ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, mac);
-        status = map_SHA2_status(ret);
+        if (PSA_ALG_IS_SHA2(hashAlg))
+        {
+            ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, mac);
+            status = map_SHA2_status(ret);
 
     #ifdef TFM_BUILD
-        if (psa_crypto_ns_caller)
-        {
-            /* Mark the segmented operation as complete so that the secure callback can at least
-             * close the driver handle.
-             */
-            ((SHA2_Object *)operation->driver.sha2.sha2Config.object)->isOpen = false;
+            if (psa_crypto_ns_caller)
+            {
+                /* Mark the segmented operation as complete so that the secure callback can at least
+                 * close the driver handle.
+                 */
+                ((SHA2_Object *)operation->driver.sha2.sha2Config.object)->isOpen = false;
+            }
+            else
+            {
+                SHA2_close((SHA2_Handle)&operation->driver.sha2.sha2Config);
+            }
+    #endif
         }
         else
-        {
-            SHA2_close((SHA2_Handle)&operation->driver.sha2.sha2Config);
-        }
-    #endif
 #endif
+#ifdef ENABLE_TI_CRYPTO_SHA3
+            if (PSA_ALG_IS_SHA3(hashAlg))
+        {
+            ret    = SHA3_finalizeHmac((SHA3_Handle)&operation->driver.sha3.sha3Config, mac);
+            status = map_SHA2_status(ret);
+        }
+        else
+#endif
+        {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
     }
     else
     {
@@ -3667,27 +4085,74 @@ psa_status_t ti_psa_mac_verify_finish(psa_mac_operation_t *psa_operation, const 
     }
     else if (PSA_ALG_IS_HMAC(operation->alg))
     {
-#ifdef ENABLE_TI_CRYPTO_SHA2
-        int rc;
+        psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(operation->alg);
 
-        if (operation->driver.sha2.sha2Object.isOpen == false)
+#ifdef ENABLE_TI_CRYPTO_SHA2
+        if (PSA_ALG_IS_SHA2(hashAlg))
         {
-            status = PSA_ERROR_BAD_STATE;
-            goto exit;
-        }
+            int rc;
+
+            if (operation->driver.sha2.sha2Object.isOpen == false)
+            {
+                status = PSA_ERROR_BAD_STATE;
+                goto exit;
+            }
 
     #ifdef TFM_BUILD
-        if (psa_crypto_ns_caller)
-        {
-            ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, &PSACrypto_s_secureCB->buffer[0]);
-            status = map_SHA2_status(ret);
+            if (psa_crypto_ns_caller)
+            {
+                ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, &PSACrypto_s_secureCB->buffer[0]);
+                status = map_SHA2_status(ret);
+            }
+            else
+    #endif
+            {
+                uint8_t actualMAC[PSA_HMAC_MAX_HASH_BLOCK_SIZE] = {0};
+
+                ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, actualMAC);
+                status = map_SHA2_status(ret);
+
+                if (status == PSA_SUCCESS)
+                {
+                    rc = memcmp(actualMAC, mac, operation->mac_size);
+
+                    if (rc != 0)
+                    {
+                        status = PSA_ERROR_INVALID_SIGNATURE;
+                    }
+                }
+            }
+
+    #ifdef TFM_BUILD
+            if (psa_crypto_ns_caller)
+            {
+                /* Mark the segmented operation as complete so that the secure callback can at least
+                 * close the driver handle.
+                 */
+                ((SHA2_Object *)operation->driver.sha2.sha2Config.object)->isOpen = false;
+            }
+            else
+            {
+                SHA2_close((SHA2_Handle)&operation->driver.sha2.sha2Config);
+            }
+    #endif
         }
         else
-    #endif
+#endif
+#ifdef ENABLE_TI_CRYPTO_SHA3
+            if (PSA_ALG_IS_SHA3(hashAlg))
         {
+            int rc;
+
+            if (operation->driver.sha3.sha3Object.isOpen == false)
+            {
+                status = PSA_ERROR_BAD_STATE;
+                goto exit;
+            }
+
             uint8_t actualMAC[PSA_HMAC_MAX_HASH_BLOCK_SIZE] = {0};
 
-            ret    = SHA2_finalizeHmac(&operation->driver.sha2.sha2Config, actualMAC);
+            ret    = SHA3_finalizeHmac((SHA3_Handle)&operation->driver.sha3.sha3Config, actualMAC);
             status = map_SHA2_status(ret);
 
             if (status == PSA_SUCCESS)
@@ -3700,21 +4165,11 @@ psa_status_t ti_psa_mac_verify_finish(psa_mac_operation_t *psa_operation, const 
                 }
             }
         }
-
-    #ifdef TFM_BUILD
-        if (psa_crypto_ns_caller)
-        {
-            /* Mark the segmented operation as complete so that the secure callback can at least
-             * close the driver handle.
-             */
-            ((SHA2_Object *)operation->driver.sha2.sha2Config.object)->isOpen = false;
-        }
         else
-        {
-            SHA2_close((SHA2_Handle)&operation->driver.sha2.sha2Config);
-        }
-    #endif
 #endif
+        {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
     }
     else
     {
@@ -3872,6 +4327,38 @@ psa_status_t ti_psa_mac_compute(mbedtls_svc_key_id_t key,
         }
 #endif
     }
+#ifdef ENABLE_TI_CRYPTO_SHA3
+    else if (PSA_ALG_IS_HMAC(alg) && PSA_ALG_IS_SHA3(PSA_ALG_HMAC_GET_HASH(alg)))
+    {
+        psa_algorithm_t hashAlg = PSA_ALG_HMAC_GET_HASH(alg);
+        SHA3_Config sha3Config;
+        SHA3XXF3HSM_Object sha3Object;
+        SHA3_Handle sha3Handle = psa_sha3_construct(&sha3Config, &sha3Object);
+
+        if (sha3Handle == NULL)
+        {
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        status = psa_set_sha3_hash_type(sha3Handle, hashAlg);
+
+        if (status == PSA_SUCCESS)
+        {
+            ret    = SHA3_hmac(sha3Handle, &cryptoKey, input, input_length, mac);
+            status = map_SHA2_status(ret);
+        }
+
+        /* Close temporary handle */
+        if (sha3Object.returnBehavior == SHA3_RETURN_BEHAVIOR_CALLBACK)
+        {
+            sha3Object.isOpen = false;
+        }
+        else
+        {
+            SHA3_close(sha3Handle);
+        }
+    }
+#endif
     else
     {
         (void)ret;
@@ -4307,7 +4794,8 @@ psa_status_t ti_psa_sign_message(mbedtls_svc_key_id_t key,
 
         ECDSA_OperationSign_init(&ecdsaSignOp);
 
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         ecdsaSignOp.curveType = map_keyTypeToECDSACurveTypeHSM(keyType, keyBits);
 
         if (ecdsaSignOp.curveType == (ECDSA_CurveType)0)
@@ -4350,27 +4838,64 @@ psa_status_t ti_psa_sign_message(mbedtls_svc_key_id_t key,
         {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
-        /* Construct our own SHA2 handle for control over the return behavior. */
-        SHA2_Config sha2Config;
-        SHA2_Object sha2Object;
-        SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
-
-        if (sha2Handle == NULL)
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(hash_alg))
         {
-            return PSA_ERROR_BAD_STATE;
+            SHA3_Config sha3Config;
+            SHA3XXF3HSM_Object sha3Object;
+            SHA3_Handle sha3Handle = psa_sha3_construct(&sha3Config, &sha3Object);
+
+            if (sha3Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            /* Compute the hash - this function will close the handle for us. */
+            status = ti_psa_hash_compute_sha3_internal(sha3Handle,
+                                                       hash_alg,
+                                                       input,
+                                                       input_length,
+                                                       hash,
+                                                       hash_size,
+                                                       &hash_length);
         }
-
-    #ifdef TFM_BUILD
-        /* For NS callers, intermediate SL calls must be in polling mode. For S callers,
-         * ALL SL calls must be in polling mode. So, if this is a TFM-build, we must
-         * be in polling mode for this intermediate operation. Note that this is redundant
-         * for S callers, since it is set this way in psa_sha2_construct anyways.
-         */
-        psa_sha2_set_return_behavior(sha2Handle, PSA_POLLING_MODE);
+        else
     #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+        {
+            /* Construct our own SHA2 handle for control over the return behavior. */
+            SHA2_Config sha2Config;
+            SHA2_Object sha2Object;
+            SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
 
-        /* Compute the hash - this function will close the handle for us. */
-        status = ti_psa_hash_compute_internal(sha2Handle, hash_alg, input, input_length, hash, hash_size, &hash_length);
+            if (sha2Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+        #ifdef TFM_BUILD
+            /* For NS callers, intermediate SL calls must be in polling mode. For S callers,
+             * ALL SL calls must be in polling mode. So, if this is a TFM-build, we must
+             * be in polling mode for this intermediate operation. Note that this is redundant
+             * for S callers, since it is set this way in psa_sha2_construct anyways.
+             */
+            psa_sha2_set_return_behavior(sha2Handle, PSA_POLLING_MODE);
+        #endif
+
+            /* Compute the hash - this function will close the handle for us. */
+            status = ti_psa_hash_compute_sha2_internal(sha2Handle,
+                                                       hash_alg,
+                                                       input,
+                                                       input_length,
+                                                       hash,
+                                                       hash_size,
+                                                       &hash_length);
+        }
+    #else
+        {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+    #endif
 
         if (status != PSA_SUCCESS)
         {
@@ -4549,7 +5074,8 @@ psa_status_t ti_psa_verify_message(mbedtls_svc_key_id_t key,
 
         ECDSA_OperationVerify_init(&ecdsaVerifyOp);
 
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         ecdsaVerifyOp.curveType = map_keyTypeToECDSACurveTypeHSM(keyType, keyBits);
 
         if (ecdsaVerifyOp.curveType == (ECDSA_CurveType)0)
@@ -4592,27 +5118,64 @@ psa_status_t ti_psa_verify_message(mbedtls_svc_key_id_t key,
         {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
-        /* Construct our own SHA2 handle for control over the return behavior. */
-        SHA2_Config sha2Config;
-        SHA2_Object sha2Object;
-        SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
-
-        if (sha2Handle == NULL)
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        if (PSA_ALG_IS_SHA3(hash_alg))
         {
-            return PSA_ERROR_BAD_STATE;
+            SHA3_Config sha3Config;
+            SHA3XXF3HSM_Object sha3Object;
+            SHA3_Handle sha3Handle = psa_sha3_construct(&sha3Config, &sha3Object);
+
+            if (sha3Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+            /* Compute the hash - this function will close the handle for us. */
+            status = ti_psa_hash_compute_sha3_internal(sha3Handle,
+                                                       hash_alg,
+                                                       input,
+                                                       input_length,
+                                                       hash,
+                                                       hash_size,
+                                                       &hash_length);
         }
-
-    #ifdef TFM_BUILD
-        /* For NS callers, intermediate SL calls must be in polling mode. For S callers,
-         * ALL SL calls must be in polling mode. So, if this is a TFM-build, we must
-         * be in polling mode for this intermediate operation. Note that this is redundant
-         * for S callers, since it is set this way in psa_sha2_construct anyways.
-         */
-        psa_sha2_set_return_behavior(sha2Handle, PSA_POLLING_MODE);
+        else
     #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA2
+        {
+            /* Construct our own SHA2 handle for control over the return behavior. */
+            SHA2_Config sha2Config;
+            SHA2_Object sha2Object;
+            SHA2_Handle sha2Handle = psa_sha2_construct(&sha2Config, &sha2Object);
 
-        /* Compute the hash - this function will close the handle for us. */
-        status = ti_psa_hash_compute_internal(sha2Handle, hash_alg, input, input_length, hash, hash_size, &hash_length);
+            if (sha2Handle == NULL)
+            {
+                return PSA_ERROR_BAD_STATE;
+            }
+
+        #ifdef TFM_BUILD
+            /* For NS callers, intermediate SL calls must be in polling mode. For S callers,
+             * ALL SL calls must be in polling mode. So, if this is a TFM-build, we must
+             * be in polling mode for this intermediate operation. Note that this is redundant
+             * for S callers, since it is set this way in psa_sha2_construct anyways.
+             */
+            psa_sha2_set_return_behavior(sha2Handle, PSA_POLLING_MODE);
+        #endif
+
+            /* Compute the hash - this function will close the handle for us. */
+            status = ti_psa_hash_compute_sha2_internal(sha2Handle,
+                                                       hash_alg,
+                                                       input,
+                                                       input_length,
+                                                       hash,
+                                                       hash_size,
+                                                       &hash_length);
+        }
+    #else
+        {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+    #endif
 
         if (status != PSA_SUCCESS)
         {
@@ -4773,7 +5336,8 @@ psa_status_t ti_psa_sign_hash(mbedtls_svc_key_id_t key,
 
     KeyStore_PSA_initKey(&privateKey, key, PSA_BITS_TO_BYTES(keyBits), NULL);
 
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     ecdsaSignOp.curveType = map_keyTypeToECDSACurveTypeHSM(privateKeyType, keyBits);
 
     if (ecdsaSignOp.curveType == (ECDSA_CurveType)0)
@@ -4922,7 +5486,8 @@ psa_status_t ti_psa_verify_hash(mbedtls_svc_key_id_t key,
 
     KeyStore_PSA_initKey(&publicKey, key, publicKeyBytes, NULL);
 
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     ecdsaVerifyOp.curveType = map_keyTypeToECDSACurveTypeHSM(keyType, keyBits);
 
     if (ecdsaVerifyOp.curveType == (ECDSA_CurveType)0)
@@ -5971,7 +6536,7 @@ psa_status_t ti_psa_cipher_set_iv(psa_cipher_operation_t *psa_operation, const u
  *  ======== psa_aesAddBlock ========
  */
 static psa_status_t psa_aesAddBlock(ti_psa_cipher_operation_t *operation,
-                                    uint8_t numBlocks,
+                                    size_t numBlocks,
                                     const uint8_t *input,
                                     uint8_t *output,
                                     bool isFinalOp)
@@ -7098,6 +7663,8 @@ psa_status_t ti_psa_aead_update(psa_aead_operation_t *psa_operation,
     size_t totalUnprocessedLen;
     ti_psa_aead_operation_t *operation = &psa_operation->MBEDTLS_PRIVATE(ctx).ti_ctx;
     uint8_t *output_aligned            = output;
+    /* Preserve temp buffer start address before output_aligned advances in loop */
+    uint8_t *output_aligned_start      = output;
     void *output_free_address          = NULL;
 
     *output_length = 0;
@@ -7176,6 +7743,7 @@ psa_status_t ti_psa_aead_update(psa_aead_operation_t *psa_operation,
         {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
+        output_aligned_start = output_aligned;
     }
 #endif
 
@@ -7205,8 +7773,10 @@ psa_status_t ti_psa_aead_update(psa_aead_operation_t *psa_operation,
 
         if (status != PSA_SUCCESS)
         {
-            if (output_aligned != output)
+            /* Check if psa_aligned_malloc allocated a temp buffer. */
+            if (output_aligned_start != output)
             {
+                /* Free the temp buffer. */
                 free(output_free_address);
             }
             return ti_psa_aead_error(operation, status, NULL);
@@ -7242,8 +7812,10 @@ psa_status_t ti_psa_aead_update(psa_aead_operation_t *psa_operation,
         status = ti_psa_aead_update_internal(operation, operation->alg, input, amountToAdd, output_aligned, isFinalOp);
         if (status != PSA_SUCCESS)
         {
-            if (output_aligned != output)
+            /* Check if psa_aligned_malloc allocated a temp buffer. */
+            if (output_aligned_start != output)
             {
+                /* Free the temp buffer. */
                 free(output_free_address);
             }
             return ti_psa_aead_error(operation, status, NULL);
@@ -7261,10 +7833,11 @@ psa_status_t ti_psa_aead_update(psa_aead_operation_t *psa_operation,
         operation->unprocessed_len = totalUnprocessedLen;
     }
 
-    if (output_aligned != output)
+    /* Check if psa_aligned_malloc allocated a temp buffer. */
+    if (output_aligned_start != output)
     {
         /* Copy back to unaligned output buffer and free temp buffer */
-        (void)memcpy(output, output_aligned, *output_length);
+        (void)memcpy(output, output_aligned_start, *output_length);
         free(output_free_address);
     }
 
@@ -7468,7 +8041,8 @@ psa_status_t ti_psa_aead_generate_nonce(psa_aead_operation_t *psa_operation,
 {
     psa_status_t status;
     ti_psa_aead_operation_t *operation = &psa_operation->MBEDTLS_PRIVATE(ctx).ti_ctx;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     uint8_t buffer[16]; /* word multiple buffer as required by HSM */
 #endif
 
@@ -7499,7 +8073,8 @@ psa_status_t ti_psa_aead_generate_nonce(psa_aead_operation_t *psa_operation,
         return ti_psa_aead_error(operation, PSA_ERROR_BUFFER_TOO_SMALL, NULL);
     }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     status = ti_psa_generate_random(buffer, sizeof(buffer));
 #else
     status = ti_psa_generate_random(nonce, *nonce_length);
@@ -7510,7 +8085,8 @@ psa_status_t ti_psa_aead_generate_nonce(psa_aead_operation_t *psa_operation,
         return ti_psa_aead_error(operation, status, NULL);
     }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     (void)memcpy(nonce, buffer, *nonce_length);
 #endif
 
@@ -8333,7 +8909,8 @@ psa_status_t ti_psa_aead_decrypt(mbedtls_svc_key_id_t key,
  */
 psa_status_t ti_psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8358,7 +8935,8 @@ psa_status_t ti_psa_key_derivation_abort(psa_key_derivation_operation_t *operati
  */
 psa_status_t ti_psa_key_derivation_get_capacity(const psa_key_derivation_operation_t *operation, size_t *capacity)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8383,7 +8961,8 @@ psa_status_t ti_psa_key_derivation_get_capacity(const psa_key_derivation_operati
  */
 psa_status_t ti_psa_key_derivation_set_capacity(psa_key_derivation_operation_t *operation, size_t capacity)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8410,7 +8989,8 @@ psa_status_t ti_psa_key_derivation_output_bytes(psa_key_derivation_operation_t *
                                                 uint8_t *output,
                                                 size_t output_length)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     return PSA_ERROR_NOT_SUPPORTED;
@@ -8424,7 +9004,8 @@ psa_status_t ti_psa_key_derivation_output_key(const psa_key_attributes_t *attrib
                                               psa_key_derivation_operation_t *operation,
                                               mbedtls_svc_key_id_t *key)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
     psa_key_attributes_t attributesCopy;
 
@@ -8472,7 +9053,8 @@ psa_status_t ti_psa_key_derivation_output_key(const psa_key_attributes_t *attrib
  */
 psa_status_t ti_psa_key_derivation_setup(psa_key_derivation_operation_t *operation, psa_algorithm_t alg)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8500,7 +9082,8 @@ psa_status_t ti_psa_key_derivation_input_bytes(psa_key_derivation_operation_t *o
                                                const uint8_t *data,
                                                size_t data_length)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8530,7 +9113,8 @@ psa_status_t ti_psa_key_derivation_input_integer(psa_key_derivation_operation_t 
                                                  psa_key_derivation_step_t step,
                                                  uint64_t value)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8557,7 +9141,8 @@ psa_status_t ti_psa_key_derivation_input_key(psa_key_derivation_operation_t *ope
                                              psa_key_derivation_step_t step,
                                              mbedtls_svc_key_id_t key)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     psa_status_t status;
 
     if (KeyStore_acquireLock())
@@ -8584,7 +9169,8 @@ psa_status_t ti_psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *
                                                 const uint8_t *expected_output,
                                                 size_t output_length)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     return PSA_ERROR_NOT_SUPPORTED;
@@ -8596,7 +9182,8 @@ psa_status_t ti_psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *
  */
 psa_status_t ti_psa_key_derivation_verify_key(psa_key_derivation_operation_t *operation, mbedtls_svc_key_id_t expected)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     return PSA_ERROR_NOT_SUPPORTED;
 #else
     return PSA_ERROR_NOT_SUPPORTED;
@@ -8671,7 +9258,8 @@ psa_status_t ti_psa_raw_key_agreement(psa_algorithm_t alg,
 
     ECDH_OperationComputeSharedSecret_init(&computeSharedSecretOp);
 
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     computeSharedSecretOp.curveType = map_keyTypeToECDHCurveTypeHSM(privateKeyType, keyBits);
 
     if (computeSharedSecretOp.curveType == 0)
@@ -8822,7 +9410,8 @@ psa_status_t ti_psa_key_derivation_key_agreement(psa_key_derivation_operation_t 
  */
 psa_status_t ti_psa_generate_random(uint8_t *output, size_t output_size)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     #ifndef ENABLE_TI_CRYPTO_RNG
     return PSA_ERROR_NOT_SUPPORTED;
     #else
@@ -8863,13 +9452,14 @@ psa_status_t ti_psa_generate_random(uint8_t *output, size_t output_size)
 
     return status;
     #endif /* ENABLE_TI_CRYPTO_TRNG */
-#endif     /* ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
-            * DeviceFamily_PARENT_CC35XX))                                                    \
-            */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
+        */
 }
 
 #ifdef ENABLE_TI_CRYPTO_RNG
-    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+    #if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+         (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /*
  *  ======== psa_get_curve_order ========
  *  Returns a pointer to the curve order in little-endian.
@@ -8890,8 +9480,10 @@ static psa_status_t psa_get_curve_order(const uint8_t **order, psa_key_type_t ke
 
     return status;
 }
-    #endif /* ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
-              DeviceFamily_PARENT_CC35XX)) */
+    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
+            * DeviceFamily_PARENT_CC35XX)                                                    \
+            * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                         \
+            */
 #endif     /* ENABLE_TI_CRYPTO_RNG */
 
 /*
@@ -8902,7 +9494,8 @@ static psa_status_t psa_get_curve_order(const uint8_t **order, psa_key_type_t ke
  */
 psa_status_t ti_psa_generate_key(const psa_key_attributes_t *attributes, mbedtls_svc_key_id_t *key)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     #ifndef ENABLE_TI_CRYPTO_RNG
     return PSA_ERROR_NOT_SUPPORTED;
     #else
@@ -9036,9 +9629,9 @@ psa_status_t ti_psa_generate_key(const psa_key_attributes_t *attributes, mbedtls
 
     return status;
     #endif /* ENABLE_TI_CRYPTO_TRNG */
-#endif     /* ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
-            * DeviceFamily_PARENT_CC35XX))                                                    \
-            */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
+        */
 }
 
 /******************************************************************************/
@@ -9054,7 +9647,8 @@ psa_status_t psa_crypto_init(void)
 
     HSMXXF3_constructRTOSObjects();
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if (HSMXXF3_init() != HSMXXF3_STATUS_SUCCESS)
     {
         return PSA_ERROR_HARDWARE_FAILURE;

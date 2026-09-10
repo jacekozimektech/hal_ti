@@ -64,6 +64,7 @@
 #include "mpdu.h"
 #include "common.h"
 #include "udata.h"
+
 #define AES_AFTER_HEADER_PAD_SIZE         8
 
 int32_t txHwQueue_VerifyDescriptorValid(uint32_t desc_id);
@@ -156,6 +157,7 @@ int32_t txCtrl_tx_allocate(uint8_t ismgmt,TTxCtrlBlk *pPktCtrlBlk, uint16_t uLif
         TX_FRAME_FLOW_CNTRL_PRINT_MUST("\n\rError !! tx_allocate no free descriptor id");
         return TXN_STATUS_BUSY;
     }
+
     ret = txHwQueue_allocate_mem_blocks(ismgmt,pPktCtrlBlk);
 
     trnspt_unlockTxQueue();
@@ -163,7 +165,7 @@ int32_t txCtrl_tx_allocate(uint8_t ismgmt,TTxCtrlBlk *pPktCtrlBlk, uint16_t uLif
     if(ret != TXN_STATUS_OK)
     {
         TX_FRAME_FLOW_CNTRL_PRINT_MUST("\n\rNotice !! tx_allocate no mem blocks");
-        txHwQueue_FreeDescForFw(pPktCtrlBlk);//free the allocated Descriptor ID
+        txHwQueue_FreeDescForFw(pPktCtrlBlk); /* Free the allocated descriptor ID */
         return TXN_STATUS_BUSY;
     }
 
@@ -280,7 +282,14 @@ void txCtrl_Init(TUdata *pUdata)
     /* Set Tx parameters to defaults */
     pTxCtrl->uPktsPendCompleteCounter = 0;
     pTxCtrl->uUpDowngradedLink = WLANLINKS_INVALID_HLID;
-    
+
+    /* Initialize descriptor ID free-stack: push IDs 1..MAX-1 (ID 0 reserved for invalid) */
+    pTxCtrl->uDescIdFreeStackTop = 0;
+    for (i = 1; i < MAX_TX_DESC_ID; i++)
+    {
+        pTxCtrl->aDescIdFreeStack[pTxCtrl->uDescIdFreeStackTop++] = i;
+    }
+
     for (i = 0; i < WLANLINKS_MAX_LINKS; i++)
     {
         pTxCtrl->aEncryptEapol[i] = DEF_EAPOL_ENCRYPTION_STATUS;
@@ -775,23 +784,34 @@ void txCtrl_UpdateQueuesMapping(void)
 ***************************************************************************/
 void *txCtrl_AllocPacketBuffer(TTxCtrlBlk *pPktCtrlBlk, uint32_t uPacketLen)
 {
-    void     *pRawBuf = os_malloc(uPacketLen);
+    void     *pRawBuf = NULL;
 
-    if (pRawBuf)
+    if (uPacketLen != 0)
     {
-        /* Indicate that the packet is in a raw buffer (i.e. not OS packet) and save its address and length */
-        pPktCtrlBlk->tTxPktParams.uFlags |= TX_CTRL_FLAG_PKT_IN_RAW_BUF;
+        pRawBuf = os_malloc(uPacketLen);
+    
+        if (pRawBuf)
+        {
+            /* Indicate that the packet is in a raw buffer (i.e. not OS packet) and save its address and length */
+            pPktCtrlBlk->tTxPktParams.uFlags |= TX_CTRL_FLAG_PKT_IN_RAW_BUF;
 
-        /* Save buffer address and length for the free operation */
-        pPktCtrlBlk->tTxPktParams.pInputPkt    = pRawBuf;
-        pPktCtrlBlk->tTxPktParams.uInputPktLen = uPacketLen;
+            /* Save buffer address and length for the free operation */
+            pPktCtrlBlk->tTxPktParams.pInputPkt    = pRawBuf;
+            pPktCtrlBlk->tTxPktParams.uInputPktLen = uPacketLen;
 
-       //Report(REPORT_SEVERITY_INFORMATION, "txCtrl_AllocPacketBuffer(): pRawBuf = 0x%x, uPacketLen = %d\r\n", pRawBuf, uPacketLen);
+        //Report(REPORT_SEVERITY_INFORMATION, "txCtrl_AllocPacketBuffer(): pRawBuf = 0x%x, uPacketLen = %d\r\n", pRawBuf, uPacketLen);
+        }
+        else
+        {
+        //Report(REPORT_SEVERITY_ERROR, "txCtrl_AllocPacketBuffer(): uPacketLen = %d, returning NULL\r\n", uPacketLen);
+            Report("\n\rERROR txCtrl_AllocPacketBuffer(): uPacketLen = %d, returning NULL", uPacketLen);
+        }
     }
     else
     {
-       //Report(REPORT_SEVERITY_ERROR, "txCtrl_AllocPacketBuffer(): uPacketLen = %d, returning NULL\r\n", uPacketLen);
-        Report("\n\rERROR xCtrl_AllocPacketBuffer(): uPacketLen = %d, returning NULL", uPacketLen);
+        /* Save buffer address and length for the free operation */
+        pPktCtrlBlk->tTxPktParams.pInputPkt    = NULL;
+        pPktCtrlBlk->tTxPktParams.uInputPktLen = uPacketLen;
     }
 
     return pRawBuf;
@@ -1019,16 +1039,17 @@ uint32_t txCtrl_BuildDataPktHdr(TTxCtrlBlk *pPktCtrlBlk, AckPolicy_e ackPolicy, 
     dot11_header_t      *pDot11Header;
     Wlan_LlcHeader_T    *pWlanSnapHeader;
     uint32_t            uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
-    Bool_e             bWmeEnabled = pTxCtrl->pUdata->aWmeEnabled[uHlid];
+    Bool_e              bWmeEnabled = pTxCtrl->pUdata->aWmeEnabled[uHlid];
     uint32_t            uHdrLen = 0;
     uint16_t            uQosControl;
     uint16_t            fc = 0;
-    uint16_t           typeLength;
+    uint16_t            typeLength;
     RoleID_t            eRoleId = pPktCtrlBlk->tTxPktParams.uFwRoleId;
     uint32_t            extraHThdr = IEEE80211_HT_CTL_LEN; // Add 4 bytes gap, may be filled later on by the PMAC
     Bool_e              isNullDataFrame = pPktCtrlBlk->tTxPktParams.isNullDataFrame;
 
     *hdrPadding = 0;
+
 
     /*
      * Handle QoS if needed:
@@ -1083,10 +1104,17 @@ uint32_t txCtrl_BuildDataPktHdr(TTxCtrlBlk *pPktCtrlBlk, AckPolicy_e ackPolicy, 
         MAC_COPY(pDot11Header->address2, pTxCtrl->pUdata->aRoleLocalMac[eRoleId]);  /* BSSID is our role address */
         MAC_COPY (pDot11Header->address3, pEthHeader->src);
 
+        fc |= DOT11_FC_FROM_DS;
+
         if (bWmeEnabled)
-            fc |= DOT11_FC_DATA_QOS | DOT11_FC_FROM_DS;
+        {
+            fc |= isNullDataFrame?DOT11_FC_DATA_NULL_QOS:DOT11_FC_DATA_QOS;
+        }
         else
-            fc |= DOT11_FC_DATA | DOT11_FC_FROM_DS;
+        {
+            fc |= isNullDataFrame?DOT11_FC_DATA_NULL_FUNCTION:DOT11_FC_DATA;
+
+        }
     }
     else  /* STA or P2PCL */
     {
@@ -1114,55 +1142,58 @@ uint32_t txCtrl_BuildDataPktHdr(TTxCtrlBlk *pPktCtrlBlk, AckPolicy_e ackPolicy, 
     }
     COPY_WLAN_WORD(&pDot11Header->fc, &fc); /* copy with endianess handling. */
 
-    /* Set the SNAP header pointer right after the other header parts handled above. */
-    pWlanSnapHeader = (Wlan_LlcHeader_T *)&(pPktCtrlBlk->aPktHdr[uHdrLen]);
-
-    typeLength = HTOWLANS(pEthHeader->type);
-
-    /* Detect the packet type and decide if to create a     */
-    /*          new SNAP or leave the original LLC.         */
-    /*------------------------------------------------------*/
-    if( typeLength > ETHERNET_MAX_PAYLOAD_SIZE )
+    if(isNullDataFrame == FALSE)
     {
-        /* Create the SNAP Header:     */
-        /*-----------------------------*/
-        /*
-         * Make a working copy of the SNAP header
-         * initialised to zero
-         */
 
-        pWlanSnapHeader->DSAP = SNAP_CHANNEL_ID;
-        pWlanSnapHeader->SSAP = SNAP_CHANNEL_ID;
-        pWlanSnapHeader->Control = LLC_CONTROL_UNNUMBERED_INFORMATION;
+        /* Set the SNAP header pointer right after the other header parts handled above. */
+        pWlanSnapHeader = (Wlan_LlcHeader_T *)&(pPktCtrlBlk->aPktHdr[uHdrLen]);
 
-        /* Check to see if the Ethertype matches anything in the translation     */
-        /* table (Appletalk AARP or DixII/IPX).  If so, add the 802.1h           */
-        /* SNAP.                                                                 */
+        typeLength = HTOWLANS(pEthHeader->type);
 
-        if(( ETHERTYPE_APPLE_AARP == typeLength ) ||
-           ( ETHERTYPE_DIX_II_IPX == typeLength ))
+        /* Detect the packet type and decide if to create a     */
+        /*          new SNAP or leave the original LLC.         */
+        /*------------------------------------------------------*/
+        if( typeLength > ETHERNET_MAX_PAYLOAD_SIZE )
         {
-            /* Fill out the SNAP Header with 802.1H extention   */
-            pWlanSnapHeader->OUI[0] = SNAP_OUI_802_1H_BYTE0;
-            pWlanSnapHeader->OUI[1] = SNAP_OUI_802_1H_BYTE1;
-            pWlanSnapHeader->OUI[2] = SNAP_OUI_802_1H_BYTE2;
+            /* Create the SNAP Header:     */
+            /*-----------------------------*/
+            /*
+            * Make a working copy of the SNAP header
+            * initialised to zero
+            */
 
+            pWlanSnapHeader->DSAP = SNAP_CHANNEL_ID;
+            pWlanSnapHeader->SSAP = SNAP_CHANNEL_ID;
+            pWlanSnapHeader->Control = LLC_CONTROL_UNNUMBERED_INFORMATION;
+
+            /* Check to see if the Ethertype matches anything in the translation     */
+            /* table (Appletalk AARP or DixII/IPX).  If so, add the 802.1h           */
+            /* SNAP.                                                                 */
+
+            if(( ETHERTYPE_APPLE_AARP == typeLength ) ||
+            ( ETHERTYPE_DIX_II_IPX == typeLength ))
+            {
+                /* Fill out the SNAP Header with 802.1H extention   */
+                pWlanSnapHeader->OUI[0] = SNAP_OUI_802_1H_BYTE0;
+                pWlanSnapHeader->OUI[1] = SNAP_OUI_802_1H_BYTE1;
+                pWlanSnapHeader->OUI[2] = SNAP_OUI_802_1H_BYTE2;
+
+            }
+            else
+            {
+                /* otherwise, add the RFC1042 SNAP   */
+                pWlanSnapHeader->OUI[0] = SNAP_OUI_RFC1042_BYTE0;
+                pWlanSnapHeader->OUI[1] = SNAP_OUI_RFC1042_BYTE0;
+                pWlanSnapHeader->OUI[2] = SNAP_OUI_RFC1042_BYTE0;
+            }
+
+            /* set type length */
+            pWlanSnapHeader->Type = pEthHeader->type;
+
+            /* Add the SNAP length to the total header length. */
+            uHdrLen += sizeof(Wlan_LlcHeader_T);
         }
-        else
-        {
-            /* otherwise, add the RFC1042 SNAP   */
-            pWlanSnapHeader->OUI[0] = SNAP_OUI_RFC1042_BYTE0;
-            pWlanSnapHeader->OUI[1] = SNAP_OUI_RFC1042_BYTE0;
-            pWlanSnapHeader->OUI[2] = SNAP_OUI_RFC1042_BYTE0;
-        }
-
-        /* set type length */
-        pWlanSnapHeader->Type = pEthHeader->type;
-
-        /* Add the SNAP length to the total header length. */
-        uHdrLen += sizeof(Wlan_LlcHeader_T);
     }
-
     if (pPktCtrlBlk->tTxDescriptor.csumData)
     {
         pPktCtrlBlk->tTxDescriptor.csumData = (((uint8_t)(uHdrLen))<< 1) |

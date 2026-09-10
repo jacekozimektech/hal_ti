@@ -49,6 +49,7 @@
 #include "common.h"
 #include "cc3xxx_public_commands.h"
 #include "errors.h"
+#include "cme_defs.h"
 
 // ============================================================================
 //		Modules private definitions
@@ -102,7 +103,8 @@
 // default configurations
 l2CfgCommon_t gL2CommonCfg =
 {
-    .supportedBandsBM = BIT_x(RADIO_BAND_2_4GHZ)| BIT_x(RADIO_BAND_5GHZ) ,       // A band isn't supported
+    .deviceSupportedBandsBM = BIT_x(RADIO_BAND_2_4GHZ)| BIT_x(RADIO_BAND_5GHZ),
+    .iniIs5GHzEnabled = TRUE,
     .band40MHzEnabled = FALSE,                          // No 40MHz support
     .dot11nEnabled = TRUE,                              // All roles support 11n features
     .mimoEnabled = FALSE,                               // No MIMO support, MCS 8-15 are not supported
@@ -278,14 +280,13 @@ l2CfgCommon_t gL2CommonCfg =
 			.rx_highest = 7,
 			.tx_mcs_map = (0xfffc),
 			.tx_highest = 7,
-		},		
-
+	},
+    .iniMixedModeEnabled = TRUE,
 };
 
 l2CfgCommon_t *gpL2CommonCfg  ;
 
 Bool32 gL2SupportHe = FALSE;
-Bool32 gL2Support5Ghz = FALSE;
 
 uint8_t gCfgApSaeAntiCloggingThreshold = SAE_ANTI_CLOGGING_DEFAULT;
 
@@ -944,18 +945,20 @@ uint16_t cfgGetFragThreshold()
     return gpL2CommonCfg->fragThreshold;
 }
 
+// ----------------------------------------------------------------------------
 Bool32 l2_cfg_is5GhzSupported(void)
 {
-    return gL2Support5Ghz;
+    return cfgGetDeviceSupportedBandsBM() & BIT(RADIO_BAND_5GHZ);
 }
 
-int8_t l2_cfg_get5GhzSupport(uint8_t *is5GhzSupported)
+// ----------------------------------------------------------------------------
+int8_t l2_cfg_setDevice5GhzSupport()
 {
     int8_t ret = 0;
     DeviceSystemInfo_t deviceSystemInfoParams;
-    deviceSystemInfoParams.systemInfoIdx = SYSTEM_INFO_PAPER_SPIN_DISABLE_5GHZ_IDX;
-    uint32_t fuse5GhzSupport = 0;
+    Bool32 fuse5GhzSupport, ini5GHzSupport;
 
+    deviceSystemInfoParams.systemInfoIdx = SYSTEM_INFO_PAPER_SPIN_DISABLE_5GHZ_IDX;
     ret = Wlan_Get(WLAN_GET_SYSINFO, (void *)&deviceSystemInfoParams);
     if (ret != 0)
     {
@@ -964,19 +967,33 @@ int8_t l2_cfg_get5GhzSupport(uint8_t *is5GhzSupported)
                          WLAN_ERROR_TYPE__CMD_GENERAL);
     }
 
-    if (is5GhzSupported != NULL)
+    /* Device system info value indicates whether 5 GHz is disabled */
+    fuse5GhzSupport = deviceSystemInfoParams.deviceSystemInfoValue == TRUE ?
+                      FALSE :
+                      TRUE;
+
+    ini5GHzSupport = gpL2CommonCfg->iniIs5GHzEnabled;
+
+    if (fuse5GhzSupport && ini5GHzSupport)
     {
-        *is5GhzSupported = !deviceSystemInfoParams.deviceSystemInfoValue;
-        gL2Support5Ghz = deviceSystemInfoParams.deviceSystemInfoValue?FALSE:TRUE;
+        cfgSetDeviceSupportedBandsBM(cfgGetDeviceSupportedBandsBM() | BIT(RADIO_BAND_5GHZ));
+        CME_PRINT_REPORT("\n\rDevice support 5GHz band operations\n\r");
     }
     else
     {
-        return WlanError(WLAN_ERROR_SEVERITY__HIGH,
-                         WLAN_ERROR_MODULE__L2_CFG,
-                         WLAN_ERROR_TYPE__NULL_BUF);
+        cfgSetDeviceSupportedBandsBM(cfgGetDeviceSupportedBandsBM() & (~BIT(RADIO_BAND_5GHZ)));
+        CME_PRINT_REPORT("\n\rDevice doesn't support 5GHz band operations (INI: %s, FUSE: %s)\n\r",
+                         ini5GHzSupport ? "SUPPORTED" : "NOT SUPPORTED",
+                         fuse5GhzSupport ? "SUPPORTED" : "NOT SUPPORTED");
     }
 
     return 0;
+}
+
+// ----------------------------------------------------------------------------
+Bool32 l2_cfg_isMixedModeSupported(void)
+{
+    return gpL2CommonCfg->iniMixedModeEnabled;
 }
 
 // ----------------------------------------------------------------------------
@@ -1488,7 +1505,31 @@ uint8_t cfgGetP2pOperRegClass()
     return gpP2pSupplicantCfg->p2pParams->p2pOperRegClass;
 }
 
+/* ----------------------------------------------------------------------------
+ cfgGetDeviceSupportedBandsBM
+      Get the bitmask of the user-config (INI) and device fuses bands support
 
+ Parameters: none
+
+Return: supported bands bitmask (based on RadioBand_e enum)
+---------------------------------------------------------------------------- */
+uint32_t cfgGetDeviceSupportedBandsBM()
+{
+    return gpL2CommonCfg->deviceSupportedBandsBM;
+}
+
+/* ----------------------------------------------------------------------------
+ cfgSetDeviceSupportedBandsBM
+      Set the bitmask of the user-config (INI) and device fuses bands support
+
+ Parameters: supported bands bitmask (based on RadioBand_e enum)
+
+Return: none
+---------------------------------------------------------------------------- */
+void cfgSetDeviceSupportedBandsBM(uint32_t supportedBandsBM)
+{
+    gpL2CommonCfg->deviceSupportedBandsBM = supportedBandsBM;
+}
 
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,18 +54,22 @@
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include <ti/drivers/power/PowerCC27XX.h>
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include <ti/drivers/power/PowerCC23X1.h>
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     #include <ti/drivers/power/PowerWFF3.h>
+    #include <ti/drivers/xmem/XMEMWFF3.h>
+    #include <ti/drivers/utils/Math.h>
 #endif
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #include DeviceFamily_constructPath(driverlib/aes.h)
     #include DeviceFamily_constructPath(inc/hw_aes.h)
     #include DeviceFamily_constructPath(inc/hw_ints.h)
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23XX) && (ENABLE_KEY_STORAGE == 1))
-    #error "Key storage is not supported for CC23XX"
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) && (ENABLE_KEY_STORAGE == 1))
+    #error "Key storage is not supported for CC23X0"
 #endif
 
 #if (ENABLE_KEY_STORAGE == 1)
@@ -99,6 +103,43 @@ static int_fast16_t AESGCMXXF3HSM_finalizeCommon(AESGCM_Handle handle,
 static int_fast16_t AESGCMXXF3HSM_createTempAssetID(AESGCM_Handle handle);
 static int_fast16_t AESGCMXXF3HSM_freeAllAssets(AESGCM_Handle handle);
 static int_fast16_t AESGCMXXF3HSM_freeTempAssetID(AESGCM_Handle handle);
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*
+ *  ======== AESGCMXXF3HSM_dataMaxChunkSize ========
+ *  Returns the largest block-aligned chunk of data/input/output that can be staged
+ *  through the bounce buffers in a single token. Considers only whichever buffers
+ *  are actually in external memory; internal-RAM buffers bypass the bounce path.
+ *  Returns 0 if a required bounce buffer has zero size (misconfigured).
+ */
+static size_t AESGCMXXF3HSM_dataMaxChunkSize(const void *input, const void *output)
+{
+    size_t inputBounceSize  = XMEMWFF3_isAddrExternal((uintptr_t)input) ? HSMXXF3_inputBounce.size : SIZE_MAX;
+    size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)output) ? HSMXXF3_outputBounce.size : SIZE_MAX;
+
+    if ((inputBounceSize == 0U) || (outputBounceSize == 0U))
+    {
+        return 0U;
+    }
+
+    return Math_MIN(inputBounceSize, outputBounceSize) & ~(AES_BLOCK_SIZE - 1U);
+}
+
+/*
+ *  ======== AESGCMXXF3HSM_aadMaxChunkSize ========
+ *  Returns the largest block-aligned chunk of AAD that can be staged through the
+ *  aux bounce buffer in a single token. Returns 0 if auxBounce is not configured.
+ */
+static size_t AESGCMXXF3HSM_aadMaxChunkSize(void)
+{
+    if (HSMXXF3_auxBounce.size == 0U)
+    {
+        return 0U;
+    }
+
+    return HSMXXF3_auxBounce.size & ~(AES_BLOCK_SIZE - 1U);
+}
+#endif
 
 /*
  *  ======== AESGCMXXF3HSM_getObject ========
@@ -297,11 +338,184 @@ static int_fast16_t AESGCMXXF3HSM_oneStepOperation(AESGCM_Handle handle,
         (void)AESGCMXXF3HSM_freeTempAssetID(handle);
 
         HSMXXF3_releaseLock();
+
+        return status;
     }
-    else
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When either AAD or data/output buffers are in PSRAM and exceed their respective bounce
+     * slots, convert to a multi-token segmented sequence: chunk AAD (if any) as AAD_ENCRYPT/DECRYPT
+     * tokens, chunk all-but-last data as DATA_ENCRYPT/DECRYPT, and the final data chunk as
+     * FINALIZE_ENCRYPT/DECRYPT. The lock is released and re-acquired between tokens; the
+     * tempAssetID preserves GHASH/CTR state across them.
+     */
     {
-        status = AESGCMXXF3HSM_performHSMOperation(handle);
+        size_t dataMaxChunk = AESGCMXXF3HSM_dataMaxChunkSize(operation->input, operation->output);
+        size_t aadMaxChunk  = AESGCMXXF3HSM_aadMaxChunkSize();
+
+        bool aadNeedsChunk = (operation->aad != NULL) && XMEMWFF3_isAddrExternal((uintptr_t)operation->aad) &&
+                             (operation->aadLength > aadMaxChunk);
+        bool dataNeedsChunk = (operation->inputLength > dataMaxChunk) &&
+                              (XMEMWFF3_isAddrExternal((uintptr_t)operation->input) ||
+                               XMEMWFF3_isAddrExternal((uintptr_t)operation->output));
+
+        if (aadNeedsChunk || dataNeedsChunk)
+        {
+            /* Multi-token chunking requires polling between tokens to re-acquire the lock;
+             * callback mode cannot block between tokens so it is not supported.
+             */
+            if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+            {
+                (void)AESGCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+
+                return AESGCM_STATUS_FEATURE_NOT_SUPPORTED;
+            }
+
+            /* A zero chunk size means the bounce buffer is misconfigured or too small to hold
+             * even one block, making chunking impossible.
+             */
+            if ((dataMaxChunk == 0U) || (aadMaxChunk == 0U))
+            {
+                (void)AESGCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+
+                return AESGCM_STATUS_ERROR;
+            }
+
+            /* A tempAssetID is required to carry GHASH/CTR state across tokens; create one now
+             * if not already present (the earlier single-step path only creates one for non-block-
+             * aligned input lengths).
+             */
+            if (object->tempAssetID == 0U)
+            {
+                status = AESGCMXXF3HSM_createTempAssetID(handle);
+
+                if (status != AESGCM_STATUS_SUCCESS)
+                {
+                    HSMXXF3_releaseLock();
+
+                    return status;
+                }
+            }
+
+            AESGCM_OperationType aadOpType   = (operationType == AESGCM_OP_TYPE_ONESTEP_ENCRYPT)
+                                                   ? AESGCM_OP_TYPE_AAD_ENCRYPT
+                                                   : AESGCM_OP_TYPE_AAD_DECRYPT;
+            AESGCM_OperationType dataOpType  = (operationType == AESGCM_OP_TYPE_ONESTEP_ENCRYPT)
+                                                   ? AESGCM_OP_TYPE_DATA_ENCRYPT
+                                                   : AESGCM_OP_TYPE_DATA_DECRYPT;
+            AESGCM_OperationType finalOpType = (operationType == AESGCM_OP_TYPE_ONESTEP_ENCRYPT)
+                                                   ? AESGCM_OP_TYPE_FINALIZE_ENCRYPT
+                                                   : AESGCM_OP_TYPE_FINALIZE_DECRYPT;
+
+            /* --- AAD phase --- */
+            if (operation->aadLength > 0U)
+            {
+                AESGCM_SegmentedAADOperation aadOp;
+                uint8_t *chunkAAD = (uint8_t *)operation->aad;
+                size_t remaining  = operation->aadLength;
+
+                object->operationType = aadOpType;
+
+                while (remaining > 0U)
+                {
+                    size_t chunkSize  = (remaining > aadMaxChunk) ? aadMaxChunk : remaining;
+                    aadOp.aad         = chunkAAD;
+                    aadOp.aadLength   = chunkSize;
+                    object->operation = (AESGCM_OperationUnion *)&aadOp;
+
+                    status = AESGCMXXF3HSM_performHSMOperation(handle);
+
+                    if (status != AESGCM_STATUS_SUCCESS)
+                    {
+                        object->operation = (AESGCM_OperationUnion *)operation;
+
+                        return status;
+                    }
+
+                    chunkAAD += chunkSize;
+                    remaining -= chunkSize;
+
+                    /* performHSMOperation releases the lock on completion, so re-acquire it
+                     * before the next chunk. Skip this on the last chunk since the loop exits.
+                     */
+                    if (remaining > 0U)
+                    {
+                        if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+                        {
+                            object->operation = (AESGCM_OperationUnion *)operation;
+
+                            return AESGCM_STATUS_RESOURCE_UNAVAILABLE;
+                        }
+                    }
+                }
+            }
+
+            /* --- Data phase --- */
+            {
+                AESGCM_SegmentedDataOperation dataOp;
+                AESGCM_SegmentedFinalizeOperation finalOp;
+                uint8_t *chunkIn  = (uint8_t *)operation->input;
+                uint8_t *chunkOut = operation->output;
+                size_t remaining  = operation->inputLength;
+
+                while (remaining > dataMaxChunk)
+                {
+                    dataOp.input          = chunkIn;
+                    dataOp.output         = chunkOut;
+                    dataOp.inputLength    = dataMaxChunk;
+                    object->operationType = dataOpType;
+                    object->operation     = (AESGCM_OperationUnion *)&dataOp;
+
+                    if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+                    {
+                        object->operation = (AESGCM_OperationUnion *)operation;
+
+                        return AESGCM_STATUS_RESOURCE_UNAVAILABLE;
+                    }
+
+                    status = AESGCMXXF3HSM_performHSMOperation(handle);
+
+                    if (status != AESGCM_STATUS_SUCCESS)
+                    {
+                        object->operation = (AESGCM_OperationUnion *)operation;
+
+                        return status;
+                    }
+
+                    chunkIn += dataMaxChunk;
+                    chunkOut += dataMaxChunk;
+                    remaining -= dataMaxChunk;
+                }
+
+                /* Final chunk — finalize op type triggers MAC computation. */
+                finalOp.input         = chunkIn;
+                finalOp.output        = chunkOut;
+                finalOp.inputLength   = remaining;
+                finalOp.mac           = operation->mac;
+                finalOp.macLength     = operation->macLength;
+                object->operationType = finalOpType;
+                object->operation     = (AESGCM_OperationUnion *)&finalOp;
+
+                if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+                {
+                    object->operation = (AESGCM_OperationUnion *)operation;
+
+                    return AESGCM_STATUS_RESOURCE_UNAVAILABLE;
+                }
+
+                status = AESGCMXXF3HSM_performHSMOperation(handle);
+            }
+
+            object->operation = (AESGCM_OperationUnion *)operation;
+
+            return status;
+        }
     }
+#endif
+
+    status = AESGCMXXF3HSM_performHSMOperation(handle);
 
     return status;
 }
@@ -850,6 +1064,25 @@ static int_fast16_t AESGCMXXF3HSM_performHSMOperation(AESGCM_Handle handle)
 
     AESGCMXXF3HSM_setupObjectMetaData(object);
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When the AAD length is not a multiple of 16 bytes and the entire AAD fits in
+     * one bounce-buffer chunk, setupObjectMetaData has no complete 16-byte blocks to
+     * submit - it buffers all bytes in aadFinalBlock for the DATA token and sets
+     * object->aadLength = 0. Submitting this zero-content token writes an initial
+     * GCM state to tempAssetID; the DATA token that follows uses loadIV=false on the
+     * already-written asset, which the EIP-130 rejects. Skip the token: aadFinalBlock
+     * is already populated and the DATA token will include those bytes with a fresh IV
+     * initialization.
+     */
+    if (((object->operationType == AESGCM_OP_TYPE_AAD_ENCRYPT) ||
+         (object->operationType == AESGCM_OP_TYPE_AAD_DECRYPT)) &&
+        (object->aadLength == 0U))
+    {
+        HSMXXF3_releaseLock();
+        return AESGCM_STATUS_SUCCESS;
+    }
+#endif
+
     /* Due to errata SYS_211, get HSM lock to avoid AHB bus master transactions. */
     if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
     {
@@ -1251,6 +1484,66 @@ int_fast16_t AESGCM_addAAD(AESGCM_Handle handle, AESGCM_SegmentedAADOperation *o
         return AESGCM_STATUS_SUCCESS;
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When AAD is in PSRAM and exceeds the aux bounce slot, chunk through multiple tokens. The
+     * tempAssetID preserves GHASH state between them. freeAllAssets is a no-op for AAD op types,
+     * so the asset survives across all but the final finalize token.
+     */
+    if (XMEMWFF3_isAddrExternal((uintptr_t)operation->aad))
+    {
+        size_t aadMaxChunk = AESGCMXXF3HSM_aadMaxChunkSize();
+
+        if (aadMaxChunk == 0U)
+        {
+            return AESGCM_STATUS_ERROR;
+        }
+
+        if (operation->aadLength > aadMaxChunk)
+        {
+            if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+            {
+                return AESGCM_STATUS_FEATURE_NOT_SUPPORTED;
+            }
+
+            AESGCM_SegmentedAADOperation tempOp;
+            uint8_t *chunkAAD = (uint8_t *)operation->aad;
+            size_t remaining  = operation->aadLength;
+            int_fast16_t status;
+
+            while (remaining > 0U)
+            {
+                size_t chunkSize  = (remaining > aadMaxChunk) ? aadMaxChunk : remaining;
+                tempOp.aad        = chunkAAD;
+                tempOp.aadLength  = chunkSize;
+                object->operation = (AESGCM_OperationUnion *)&tempOp;
+
+                if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+                {
+                    object->operation = (AESGCM_OperationUnion *)operation;
+
+                    return AESGCM_STATUS_RESOURCE_UNAVAILABLE;
+                }
+
+                status = AESGCMXXF3HSM_performHSMOperation(handle);
+
+                if (status != AESGCM_STATUS_SUCCESS)
+                {
+                    object->operation = (AESGCM_OperationUnion *)operation;
+
+                    return status;
+                }
+
+                chunkAAD += chunkSize;
+                remaining -= chunkSize;
+            }
+
+            object->operation = (AESGCM_OperationUnion *)operation;
+
+            return AESGCM_STATUS_SUCCESS;
+        }
+    }
+#endif
+
     if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
     {
         return AESGCM_STATUS_RESOURCE_UNAVAILABLE;
@@ -1258,6 +1551,48 @@ int_fast16_t AESGCM_addAAD(AESGCM_Handle handle, AESGCM_SegmentedAADOperation *o
 
     return AESGCMXXF3HSM_performHSMOperation(handle);
 }
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*
+ *  ======== AESGCMXXF3HSM_processExternalDataChunks ========
+ *  Submits DATA tokens for PSRAM-backed input/output in maxChunkSize increments
+ *  while remaining > stopAt, advancing *pChunkIn, *pChunkOut, and *pRemaining.
+ *  stopAt = 0 consumes all data; stopAt = maxChunkSize leaves the last chunk
+ *  for the caller to submit as a FINALIZE token.
+ */
+static int_fast16_t AESGCMXXF3HSM_processExternalDataChunks(AESGCM_Handle handle,
+                                                            AESGCM_OperationType dataOpType,
+                                                            uint8_t **pChunkIn,
+                                                            uint8_t **pChunkOut,
+                                                            size_t *pRemaining,
+                                                            size_t maxChunkSize,
+                                                            size_t stopAt)
+{
+    AESGCM_SegmentedDataOperation tempOp;
+    int_fast16_t status = AESGCM_STATUS_SUCCESS;
+
+    while (*pRemaining > stopAt)
+    {
+        size_t chunkSize   = (*pRemaining > maxChunkSize) ? maxChunkSize : *pRemaining;
+        tempOp.input       = *pChunkIn;
+        tempOp.output      = *pChunkOut;
+        tempOp.inputLength = chunkSize;
+
+        status = AESGCMXXF3HSM_addData(handle, dataOpType, (AESGCM_OperationUnion *)&tempOp);
+
+        if (status != AESGCM_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        *pChunkIn += chunkSize;
+        *pChunkOut += chunkSize;
+        *pRemaining -= chunkSize;
+    }
+
+    return status;
+}
+#endif
 
 /*
  *  ======== AESGCM_addData ========
@@ -1308,6 +1643,42 @@ int_fast16_t AESGCM_addData(AESGCM_Handle handle, AESGCM_SegmentedDataOperation 
     {
         operationType = AESGCM_OP_TYPE_DATA_DECRYPT;
     }
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When input or output is in PSRAM and exceeds the bounce slot, split into block-aligned chunks.
+     * freeAllAssets is a no-op for DATA op types, so the tempAssetID (GHASH/CTR state) survives
+     * across all chunk tokens.
+     */
+    if (XMEMWFF3_isAddrExternal((uintptr_t)operation->input) || XMEMWFF3_isAddrExternal((uintptr_t)operation->output))
+    {
+        size_t maxChunkSize = AESGCMXXF3HSM_dataMaxChunkSize(operation->input, operation->output);
+
+        if (maxChunkSize == 0U)
+        {
+            return AESGCM_STATUS_ERROR;
+        }
+
+        if (operation->inputLength > maxChunkSize)
+        {
+            if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+            {
+                return AESGCM_STATUS_FEATURE_NOT_SUPPORTED;
+            }
+
+            uint8_t *chunkIn  = (uint8_t *)operation->input;
+            uint8_t *chunkOut = operation->output;
+            size_t remaining  = operation->inputLength;
+
+            return AESGCMXXF3HSM_processExternalDataChunks(handle,
+                                                           operationType,
+                                                           &chunkIn,
+                                                           &chunkOut,
+                                                           &remaining,
+                                                           maxChunkSize,
+                                                           0U);
+        }
+    }
+#endif
 
     return AESGCMXXF3HSM_addData(handle, operationType, (AESGCM_OperationUnion *)operation);
 }
@@ -1399,6 +1770,60 @@ static int_fast16_t AESGCMXXF3HSM_finalizeCommon(AESGCM_Handle handle,
 
     if ((operation->inputLength > 0U) || (object->totalAADLengthRemaining > 0U))
     {
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        /* When input or output is in PSRAM and exceeds the bounce slot, process all but the last
+         * chunk as DATA tokens, then submit the last chunk as the FINALIZE token. The DATA op type
+         * keeps freeAllAssets as a no-op so the tempAssetID survives between tokens.
+         */
+        if ((operation->inputLength > 0U) && (XMEMWFF3_isAddrExternal((uintptr_t)operation->input) ||
+                                              XMEMWFF3_isAddrExternal((uintptr_t)operation->output)))
+        {
+            size_t maxChunkSize = AESGCMXXF3HSM_dataMaxChunkSize(operation->input, operation->output);
+
+            if (maxChunkSize == 0U)
+            {
+                return AESGCM_STATUS_ERROR;
+            }
+
+            if (operation->inputLength > maxChunkSize)
+            {
+                if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+                {
+                    return AESGCM_STATUS_FEATURE_NOT_SUPPORTED;
+                }
+
+                AESGCM_OperationType dataOpType = (operationType == AESGCM_OP_TYPE_FINALIZE_ENCRYPT)
+                                                      ? AESGCM_OP_TYPE_DATA_ENCRYPT
+                                                      : AESGCM_OP_TYPE_DATA_DECRYPT;
+
+                AESGCM_SegmentedFinalizeOperation finalOp;
+                uint8_t *chunkIn  = (uint8_t *)operation->input;
+                uint8_t *chunkOut = operation->output;
+                size_t remaining  = operation->inputLength;
+
+                status = AESGCMXXF3HSM_processExternalDataChunks(handle,
+                                                                 dataOpType,
+                                                                 &chunkIn,
+                                                                 &chunkOut,
+                                                                 &remaining,
+                                                                 maxChunkSize,
+                                                                 maxChunkSize);
+
+                if (status != AESGCM_STATUS_SUCCESS)
+                {
+                    return status;
+                }
+
+                finalOp.input       = chunkIn;
+                finalOp.output      = chunkOut;
+                finalOp.inputLength = remaining;
+                finalOp.mac         = operation->mac;
+                finalOp.macLength   = operation->macLength;
+
+                return AESGCMXXF3HSM_addData(handle, operationType, (AESGCM_OperationUnion *)&finalOp);
+            }
+        }
+#endif
         status = AESGCMXXF3HSM_addData(handle, operationType, (AESGCM_OperationUnion *)operation);
     }
     else

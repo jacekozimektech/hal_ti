@@ -93,7 +93,6 @@ typedef struct
     uint32_t uMinGuaranteePerAc[MAX_NUM_OF_AC];       /* Configurable min guarantee packets per AC */
     uint32_t uEffectiveTotalAc;                       /* Effective total packets for AC check */
     uint32_t uEffectiveTotalAcMin;                    /* Just for sunity check */
-    int32_t uPktPendTXData;                           /* total packets pending*/
     /* Resources per Link */
     uint32_t uPktInUsePerLink[WLANLINKS_MAX_LINKS];   /* Packet counter per AC */
     uint32_t uPktAllocPerLink[WLANLINKS_MAX_LINKS];   /* Packet counter per AC */
@@ -132,8 +131,6 @@ typedef struct
 
     /* Tx aQueues */
     uint32_t             aQueueMaxSize[MAX_NUM_OF_AC]; /* indicates the max size of each Data queue */
-    uint32_t             aTxSendPaceThresh[MAX_NUM_OF_AC]; /* Number of packets to queue before scheduling Tx handling */
-    uint32_t             aTxSendPaceTimeoutMsec; /* Number of packets to queue before scheduling Tx handling */
 
     /* Tx Link Queues */
     TDataLinkQ           aDataLinkQ[WLANLINKS_MAX_LINKS]; /* Link queues handles. */
@@ -159,7 +156,6 @@ typedef struct
     uint32_t             uClsfrMismatchCount;
     uint32_t             uTxSendPaceTimeoutsCount;
     uint32_t             uNoResourcesCount;
-    int32_t              uTxDataReqScheduleCount;
     int32_t              txMgmtReqScheduleCount;
 
     uint8_t              txDataLinkRemoved;      /* notice to the data scheduler that link was removed */

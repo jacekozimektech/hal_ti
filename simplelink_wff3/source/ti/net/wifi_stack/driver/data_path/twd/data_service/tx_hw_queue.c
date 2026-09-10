@@ -182,28 +182,17 @@ int32_t txHwQueue_PrepareDescForFw(TTxCtrlBlk *pPktCtrlBlk, uint16_t uLifeTime)
 #endif
     pPktCtrlBlk->tTxDescriptor.lifeTime  = uLifeTime;//ENDIAN_HANDLE_WORD(uLifeTime);
 
-    tx_NumMaxTxDescriptor = MIN(pTxHwQueue->tx_NumTxDescriptor,MAX_TX_DESC_ID);
-    /* Allocate a free desc-ID */
-    for (i = 1; i < tx_NumMaxTxDescriptor; i++)//OSPREY_MX-28 index starts with 1, since 0 uses for empty descid.
-    {
-        if (pTxCtrl->aTxDescIds[i] == NULL)
-        {
-            pTxCtrl->aTxDescIds[i] = pPktCtrlBlk;
-            pPktCtrlBlk->tTxDescriptor.descID = i;
-            break;
-        }
-    }
-    if(i == tx_NumMaxTxDescriptor)
+    /* Allocate a free desc-ID from the O(1) free-stack */
+    if (pTxCtrl->uDescIdFreeStackTop == 0)
     {
         TX_FRAME_FLOW_CNTRL_PRINT_MUST("\n\rError !! no free descriptor id\n");
-        ret = TXN_STATUS_ERROR;
+        return TXN_STATUS_ERROR;
     }
-    else
-    {
-        TX_FRAME_FLOW_CNTRL_PRINT_MUST("\n\rDescriptor Id chosen:, descID=%d", i);
-        ret = TXN_STATUS_OK;
-    }
-    return ret;
+    i = pTxCtrl->aDescIdFreeStack[--pTxCtrl->uDescIdFreeStackTop];
+    pTxCtrl->aTxDescIds[i] = pPktCtrlBlk;
+    pPktCtrlBlk->tTxDescriptor.descID = i;
+    TX_FRAME_FLOW_CNTRL_PRINT_MUST("\n\rDescriptor Id chosen:, descID=%d", i);
+    return TXN_STATUS_OK;
 }
 
 
@@ -217,8 +206,8 @@ void txHwQueue_FreeDescForFw(TTxCtrlBlk *pPktCtrlBlk)
     TX_FRAME_FLOW_CNTRL_PRINT("\r\nfree_tx_descr id , descID: %d ",descID);
     pTxCtrl->aTxDescIds[descID] = NULL;
     pPktCtrlBlk->tTxDescriptor.descID = 0;
+    pTxCtrl->aDescIdFreeStack[pTxCtrl->uDescIdFreeStackTop++] = descID;
     trnspt_unlockTxQueue();
-
 }
 
 int32_t txHwQueue_VerifyDescriptorValid(uint32_t desc_id)
@@ -472,7 +461,7 @@ uint32_t txHwQueue_GetHwBlocksRequireForAvgFrame ()
 /****************************************************************************
  * FUNCTION:    txHwQueue_GetTxAcPktsCount()
  * 
- * DESCRIPTION: Gets the specific Ac tx packets that allocated in FW
+ * DESCRIPTION: Gets the the tx count which were send to the FW and didn't recieve tx complete
  *
  * INPUTS:  uAc - access category
  *

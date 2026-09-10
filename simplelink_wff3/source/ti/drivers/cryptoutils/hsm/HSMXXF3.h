@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2026, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -37,16 +37,77 @@
  *
  *  This module provides functions for use of the Hardware Security Module.
  *
- *  The HSM initialization procedure must first enable the clock, then initialize the
- *  mailbox, and finally boot the device.
+ *  The HSM initialization procedure must first enable the clock, then
+ *  initialize the mailbox, and finally boot the device.
  *
  *  APIs are provided to synchronize access to the HSM and submit command tokens,
  *  constructed by TI crypto drivers.
  *
- * Additional APIs to construct command tokens, interpret result token data as well as additional key/asset management
- * operations.
+ *  Additional APIs to construct command tokens, interpret result token data as
+ *  well as additional key/asset management operations.
  *
+ *  @anchor HSMXXF3_BounceBuffers
+ *  ## Bounce Buffers (CC35xx only)
  *
+ *  On CC35xx, the HSM cannot access external memory directly. When data
+ *  resides in external memory, crypto drivers stage it through internal-RAM
+ *  bounce buffers before submitting tokens to the HSM, and copy results back
+ *  out afterwards:
+ *
+ *  | Variable                  | Used for            |
+ *  |---------------------------|---------------------|
+ *  | `HSMXXF3_inputBounce`     | PSRAM + flash input |
+ *  | `HSMXXF3_outputBounce`    | PSRAM output only   |
+ *  | `HSMXXF3_auxBounce`       | PSRAM + flash aux   |
+ *
+ *  Flash output is not supported; setting `HSMXXF3_outputBounce.size` to zero
+ *  is valid when PSRAM is not used with crypto drivers.
+ *
+ *  Setting a buffer's `size` field to zero disables it. Any operation that
+ *  requires the disabled buffer will return
+ *  #HSMXXF3_STATUS_BOUNCE_UNAVAILABLE. The SysConfig HSM module configures
+ *  buffers based on which external memory types are used with crypto drivers.
+ *
+ *  When defining buffers manually, each array must be aligned to 4 bytes and
+ *  placed in `.internalRAM.bss`. For example:
+ *
+ *  @code
+ *  static uint8_t myInputBuf[4096] __attribute__((aligned(4), section(".internalRAM.bss")));
+ *  HSMXXF3_BounceBuffer HSMXXF3_inputBounce = {
+ *     .size = sizeof(myInputBuf),
+ *     .buffer = myInputBuf
+ *  };
+ *  @endcode
+ *
+ *  ### Size constraints
+ *
+ *  The following constraints apply when a buffer is enabled (size > 0).
+ *
+ *  **Input buffer** (`HSMXXF3_inputBounce.size`):
+ *  - At least 16 bytes (one AES block).
+ *  - At least 128 bytes if any SHA2 driver object may be in external memory
+ *    (SHA2 maximum block size).
+ *  - At least 144 bytes if any SHA3 driver object may be in external memory
+ *    (SHA3 maximum block size: SHA3-224 rate).
+ *  - At least 96 bytes if EdDSA sign or verify operations are used with a
+ *    driver object in external memory (EdDSA sign-initial maximum length).
+ *  - At least 384 bytes if EdDSA sign or verify operations are used with the
+ *    message in external memory (SHA-512 intermediate hash chunking:
+ *    2 × 128-byte blocks reserved for finalization + up to 127-byte SHA-512
+ *    alignment remainder).
+ *
+ *  **Output buffer** (`HSMXXF3_outputBounce.size`):
+ *  - At least 16 bytes (one AES block) when enabled.
+ *  - At least 144 bytes if ECDSA, EdDSA sign, or ECDH operations are used
+ *    with a driver object in external memory (ECDSA/ECDH component vector
+ *    length for P-521).
+ *
+ *  **Auxiliary buffer** (`HSMXXF3_auxBounce.size`):
+ *  - At least 16 bytes (one AES block).
+ *  - At least 72 bytes if EdDSA verify is used with a driver object in
+ *    external memory (EdDSA component vector length).
+ *  - At least 144 bytes if ECDSA verify is used with a driver object in
+ *    external memory (ECDSA component vector length).
  *
  */
 
@@ -58,6 +119,12 @@
 #include <ti/devices/DeviceFamily.h>
 #include <ti/drivers/SHA2.h>
 #include <ti/drivers/sha2/SHA2XXF3HSM.h>
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* SHA3 only supported for CC35XX */
+    #include <ti/drivers/SHA3.h>
+    #include <ti/drivers/sha3/SHA3XXF3HSM.h>
+#endif
 
 #include <ti/drivers/AESGCM.h>
 #include <ti/drivers/aesgcm/AESGCMXXF3HSM.h>
@@ -135,6 +202,16 @@
  */
 #define HSMXXF3_STATUS_RESOURCE_UNAVAILABLE ((int_fast16_t)-4)
 
+/*!
+ *  @brief  A required bounce buffer is not configured.
+ *
+ *  Returned when an operation targets external memory but the corresponding
+ *  bounce buffer has `size` zero. Configure the buffer via SysConfig by
+ *  enabling the relevant external memory type. If not using SysConfig, define
+ *  an #HSMXXF3_BounceBuffer directly. See #HSMXXF3_BounceBuffers.
+ */
+#define HSMXXF3_STATUS_BOUNCE_UNAVAILABLE ((int_fast16_t)-5)
+
 /* Co-processor ID for LAES */
 #define HSMXXF3_LAES_COPROCESSOR_ID 0x1
 
@@ -162,6 +239,29 @@
     #define PowerLPF3_ENTERING_STANDBY PowerWFF3_ENTERING_SLEEP
     #define PowerLPF3_AWAKE_STANDBY    PowerWFF3_AWAKE_SLEEP
     #define PowerLPF3_DISALLOW_STANDBY PowerWFF3_DISALLOW_SLEEP
+
+#endif
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*!
+ *  @brief  Bounce buffer descriptor for HSM external-memory staging (CC35xx only).
+ *
+ *  The HSM on CC35xx cannot access external memory (PSRAM or external flash)
+ *  directly. Crypto drivers stage data through internal-RAM buffers described
+ *  by this type before submitting tokens to the HSM.
+ *
+ *  Setting `size` to zero disables the buffer; any operation that requires it
+ *  returns #HSMXXF3_STATUS_BOUNCE_UNAVAILABLE. `buffer` must point to
+ *  internal RAM aligned to 4 bytes and placed in `.internalRAM.bss` whenever
+ *  `size` is non-zero.
+ *
+ *  See #HSMXXF3_BounceBuffers for size constraints and a usage example.
+ */
+typedef struct
+{
+    size_t size;     /*!< Capacity of the buffer in bytes; 0 disables the buffer */
+    uint8_t *buffer; /*!< Pointer to the internal-RAM backing array */
+} HSMXXF3_BounceBuffer;
 #endif
 
 /*!
@@ -248,6 +348,39 @@ typedef struct
     HSMXXF3_CallbackFxn callbackFxn;
     uintptr_t driverHandle;
 } HSMXXF3_Operation;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*!
+ *  @brief  Input bounce buffer; `size` 0 disables it.
+ *
+ *  When `size` is non-zero: at least 16 bytes, at least 128 if any SHA2
+ *  driver object may reside in external memory, at least 96 if EdDSA
+ *  operations are used with a driver object in external memory, and at least
+ *  384 if EdDSA sign/verify is used with messages in external memory.
+ *  See #HSMXXF3_BounceBuffers for full constraints and an example.
+ */
+extern HSMXXF3_BounceBuffer HSMXXF3_inputBounce;
+
+/*!
+ *  @brief  Output bounce buffer; `size` 0 disables it.
+ *
+ *  Only used for PSRAM output; may have `size` 0 when PSRAM is not used with
+ *  crypto drivers. When `size` is non-zero: at least 16 bytes, at least 144
+ *  if ECDSA or EdDSA sign operations are used with a driver object in external
+ *  memory. See #HSMXXF3_BounceBuffers for full constraints and an example.
+ */
+extern HSMXXF3_BounceBuffer HSMXXF3_outputBounce;
+
+/*!
+ *  @brief  Auxiliary bounce buffer; `size` 0 disables it.
+ *
+ *  When `size` is non-zero: at least 16 bytes, at least 144 if ECDSA verify
+ *  is used with a driver object in external memory, or at least 72 for EdDSA
+ *  verify only. See #HSMXXF3_BounceBuffers for full constraints and an
+ *  example.
+ */
+extern HSMXXF3_BounceBuffer HSMXXF3_auxBounce;
+#endif
 
 /*!
  *  @brief  Initializes the HWI and semaphores for HSMXXF3.
@@ -488,13 +621,26 @@ int32_t HSMXXF3_getResultCode(void);
 uint32_t HSMXXF3_getResultAssetID(void);
 
 /*!
- *  @brief  Copies a hash operation's digest to user space
+ *  @brief  Copies a hash operation's final digest to user space
  *
- *  @param  [in] digest             User specified destination address
+ *  @deprecated Use #HSMXXF3_getResultHashState() for intermediate state
+ *              retrieval. This function remains valid for final digest output.
  *
- *  @param  [in] digestLength User's digest length
+ *  @param  [out] digest        User specified destination address
+ *  @param  [in]  digestLength  Digest length in bytes
  */
 void HSMXXF3_getResultDigest(uint8_t *digest, size_t digestLength);
+
+/*!
+ *  @brief  Copies hash state from a result token
+ *
+ *  Extracts the intermediate hash state or final digest from the HSM result
+ *  token into user-provided memory.
+ *
+ *  @param  [out] state        Destination buffer
+ *  @param  [in]  stateLength  Number of bytes to copy
+ */
+void HSMXXF3_getResultHashState(uint8_t *state, size_t stateLength);
 
 /*!
  *  @brief  Fetches the AES tag
@@ -592,6 +738,16 @@ int_fast16_t HSMXXF3_constructExportAssetCopToken(uint32_t assetId, uint16_t cop
  *
  */
 void HSMXXF3_constructSHA2PhysicalToken(SHA2XXF3HSM_Object *object);
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*!
+ *  @brief  Constructs a SHA3 onestep/segmented command token
+ *
+ *  @param  [in] object             SHA3XXF3HSM object
+ *
+ */
+void HSMXXF3_constructSHA3PhysicalToken(SHA3XXF3HSM_Object *object);
+#endif
 
 /*!
  *  @brief  Constructs a ECDH gen pub key command token
@@ -725,7 +881,7 @@ void HSMXXF3_constructAESCBCOneStepPhysicalToken(AESCBCXXF3_Object *object, uint
  */
 void HSMXXF3_constructCMACToken(AESCMACXXF3_Object *object, bool isFirst, bool isFinal);
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*!
  *  @brief  Constructs an RNG configure token for CRNG/TRNG operations command token
  *
@@ -748,7 +904,8 @@ void HSMXXF3_constructRNGSwitchNRBGWithDefaultsPhysicalToken(HSMXXF3_NRBGMode HS
  *
  */
 void HSMXXF3_constructRNGReseedDRBGPhysicalToken(void);
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*!
  *  @brief  Constructs an RNG get random number command token

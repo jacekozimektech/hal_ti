@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2026, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,6 +47,17 @@
  *  - Decryption is not supported since the AES HW only supports encryption.
  *  - Only plaintext CryptoKeys are supported by this implementation.
  *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #AESECB_RETURN_BEHAVIOR_CALLBACK is not supported when:
+ *  - The output buffer is in PSRAM, and/or
+ *  - The input buffer is in PSRAM or flash and the input length exceeds the
+ *    bounce buffer chunk size (min of input/output bounce buffer sizes,
+ *    rounded down to an AES block boundary).
+ *
+ *  Returns #AESECB_STATUS_FEATURE_NOT_SUPPORTED in both cases.
+ *  Use #AESECB_RETURN_BEHAVIOR_BLOCKING or #AESECB_RETURN_BEHAVIOR_POLLING
+ *  instead. See #HSMXXF3_BounceBuffers.
+ *
  *  # Runtime Parameter Validation #
  *  The driver implementation does not perform runtime checks for most input
  *  parameters. Only values that are likely to have a stochastic element to
@@ -84,7 +95,8 @@ extern "C" {
  *  Trigger points for auto ECB as WRBUF3S (encryption starts by writing BUF3)
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESECBXXF3_SINGLE_BLOCK_AUTOCFG \
         ((uint32_t)AES_AUTOCFG_AESSRC_BUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3S | (uint32_t)AES_AUTOCFG_BUSHALT_EN)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
@@ -114,7 +126,8 @@ typedef struct
     AESECB_CallbackFxn callbackFxn;
     AESECB_OperationType operationType;
     bool threadSafe;
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     const uint8_t *input;
     uint8_t *output;
     size_t inputLength;

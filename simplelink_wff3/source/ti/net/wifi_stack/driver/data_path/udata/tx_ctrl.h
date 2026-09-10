@@ -149,6 +149,8 @@ typedef struct
 
     TTxCtrlBlk         *aTxDescIds[MAX_TX_DESC_ID]; /* An allocated entry holds the TxCtrlBlk of a Tx pakcet sent to FW (NULL if free). */
                                                     /* The entry index is used as the descID written in the TxDescriptor and returned in the TxResult. */
+    uint8_t             aDescIdFreeStack[MAX_TX_DESC_ID]; /* Stack of free descriptor IDs for O(1) alloc/free. */
+    uint8_t             uDescIdFreeStackTop;               /* Number of IDs currently in the stack. */
 
     /* Admission control and backpressure (for busy queues mapping) */
     TTxHwBackpressure   tBackpressure;                    /* Last backpressure update from FW. */

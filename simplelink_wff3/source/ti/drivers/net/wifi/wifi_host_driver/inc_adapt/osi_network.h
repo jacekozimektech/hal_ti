@@ -29,12 +29,6 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * osi_network.h
- *
- *  Created on: 14 Nov 2023
- *      Author: user
- */
 
 #ifndef INC_ADAPT_OSI_NETWORK_H_
 #define INC_ADAPT_OSI_NETWORK_H_

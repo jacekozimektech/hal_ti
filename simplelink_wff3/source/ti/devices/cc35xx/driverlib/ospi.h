@@ -3,7 +3,7 @@
  *
  *  Description:    Defines and prototypes for the OSPI peripheral.
  *
- *  Copyright (c) 2024 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __OSPI_H__
-#define __OSPI_H__
+#ifndef ti_devices_ospi__include
+#define ti_devices_ospi__include
 
 //*****************************************************************************
 //
@@ -246,4 +246,4 @@ void OSPISetCommandAddress(uint32_t address);
 //
 //*****************************************************************************
 
-#endif // __OSPI_H__
+#endif // ti_devices_ospi__include

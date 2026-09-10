@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2026, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -48,11 +48,12 @@
     #include <ti/drivers/dma/UDMALPF3.h>
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23XX) && (ENABLE_KEY_STORAGE == 1))
-    #error "Key storage is not supported for CC23XX"
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) && (ENABLE_KEY_STORAGE == 1))
+    #error "Key storage is not supported for CC23X0"
 #endif
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     /* Using LPF3 driver implementation for WFF3 device, CC35XX since the HSM IP is the same. */
     #if (ENABLE_KEY_STORAGE == 1)
         /* These includes must come before hsmddk/include/Integration/Adapter_PSA includes */
@@ -66,6 +67,10 @@
     #include <third_party/hsmddk/include/Integration/Adapter_PSA/incl/adapter_psa_asset.h>
     #include <third_party/hsmddk/include/Kit/EIP130/TokenHelper/incl/eip130_token_result.h>
     #include <third_party/hsmddk/include/Kit/EIP130/TokenHelper/incl/eip130_token_asset.h>
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        #include <ti/drivers/xmem/XMEMWFF3.h>
+        #include <ti/drivers/utils/Math.h>
+    #endif
 #endif
 
 #include <ti/drivers/dpl/DebugP.h>
@@ -86,7 +91,8 @@
  *  DONEACT as GATE_TRGAES_ON_CHA_DEL (to avoid spurious last ECB using DMA)
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCBCXXF3_DEFAULT_AUTOCFG                                                 \
         ((uint32_t)AES_AUTOCFG_AESSRC_TXTXBUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3S | \
          (uint32_t)AES_AUTOCFG_TRGAES_RDTXT3 | (uint32_t)AES_AUTOCFG_BUSHALT_EN)
@@ -102,7 +108,8 @@
  *  Trigger points for auto CBC as WRBUF3S (encryption starts by writing BUF3)
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCBCXXF3_SINGLE_BLOCK_AUTOCFG \
         ((uint32_t)AES_AUTOCFG_AESSRC_TXTXBUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3S | (uint32_t)AES_AUTOCFG_BUSHALT_EN)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
@@ -128,14 +135,17 @@ static int_fast16_t AESCBCXXF3_startOperation(AESCBC_Handle handle,
 static inline int_fast16_t AESCBCXXF3_waitForResult(AESCBC_Handle handle);
 #endif
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 static int_fast16_t AESCBCXXF3HSM_oneStepOperation(AESCBC_Handle handle,
                                                    AESCBC_OneStepOperation *operation,
                                                    AESCBC_OperationType operationType);
 static int_fast16_t AESCBCXXF3HSM_processData(AESCBC_Handle handle);
 int_fast16_t AESCBCXXF3HSM_addData(AESCBC_Handle handle, AESCBC_SegmentedOperation *operation);
 int_fast16_t AESCBCXXF3HSM_finalize(AESCBC_Handle handle, AESCBC_SegmentedOperation *operation);
+    #if (ENABLE_KEY_STORAGE == 1)
 static int_fast16_t AESCBCXXF3HSM_freeAllAssets(AESCBC_Handle handle);
+    #endif
 #endif
 
 /*
@@ -197,7 +207,8 @@ static void AESCBCXXF3_hwiFxn(uintptr_t arg0)
  */
 void AESCBC_init(void)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     HSMXXF3_constructRTOSObjects();
 #endif
 #if (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX)
@@ -226,7 +237,8 @@ AESCBC_Handle AESCBC_construct(AESCBC_Config *config, const AESCBC_Params *param
     }
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     /* Initialize and boot HSM */
     if (HSMXXF3_init() != HSMXXF3_STATUS_SUCCESS)
     {
@@ -335,7 +347,8 @@ int_fast16_t AESCBC_oneStepEncrypt(AESCBC_Handle handle, AESCBC_Operation *opera
     }
     else
 #endif
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
         if ((operation->key->encoding == CryptoKey_PLAINTEXT_HSM) ||
             (operation->key->encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -358,7 +371,8 @@ int_fast16_t AESCBC_oneStepDecrypt(AESCBC_Handle handle, AESCBC_Operation *opera
     DebugP_assert(operation);
     int_fast16_t status = AESCBC_STATUS_SUCCESS;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if ((operation->key->encoding == CryptoKey_PLAINTEXT_HSM) || (operation->key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         status = AESCBCXXF3HSM_oneStepOperation(handle, operation, AESCBC_OPERATION_TYPE_DECRYPT);
@@ -663,7 +677,8 @@ int_fast16_t AESCBC_setupEncrypt(AESCBC_Handle handle, const CryptoKey *key)
     }
     else
 #endif
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         if (object->hsmStatus != HSMXXF3_STATUS_SUCCESS)
@@ -689,6 +704,7 @@ int_fast16_t AESCBC_setupEncrypt(AESCBC_Handle handle, const CryptoKey *key)
     }
     else
 #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
         */
     {
         /* User Key encoding is not valid or not supported */
@@ -718,7 +734,8 @@ int_fast16_t AESCBC_setupDecrypt(AESCBC_Handle handle, const CryptoKey *key)
     AESCBCXXF3_Object *object = AESCBCXXF3_getObject(handle);
     int_fast16_t status       = AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         /* If the HSM IP and/or HSMSAL failed to boot then we cannot perform any HSM-related operation */
@@ -773,7 +790,8 @@ int_fast16_t AESCBC_addData(AESCBC_Handle handle, AESCBC_SegmentedOperation *ope
     AESCBCXXF3_Object *object = AESCBCXXF3_getObject(handle);
     int_fast16_t status       = AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -834,7 +852,8 @@ int_fast16_t AESCBC_finalize(AESCBC_Handle handle, AESCBC_SegmentedOperation *op
     AESCBCXXF3_Object *object = AESCBCXXF3_getObject(handle);
     int_fast16_t status       = AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -941,7 +960,8 @@ int_fast16_t AESCBC_cancelOperation(AESCBC_Handle handle)
      * Do not execute the callback as it would have been executed already
      * when the operation completed.
      */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if (((object->common.key.encoding & CRYPTOKEY_HSM) == 0) && (!object->common.operationInProgress))
 #else
     if (!object->common.operationInProgress)
@@ -961,7 +981,8 @@ int_fast16_t AESCBC_cancelOperation(AESCBC_Handle handle)
     AESCommonXXF3_cancelOperation(&object->common, true);
 #endif
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     if ((object->common.key.encoding & CRYPTOKEY_HSM))
     {
         /* Since the HSM cannot cancel an in-progress token, we must wait for the result to allow for
@@ -975,9 +996,12 @@ int_fast16_t AESCBC_cancelOperation(AESCBC_Handle handle)
          * this is successful, we should continue on to attempt cancellation of
          * the operation.
          */
+    #if (ENABLE_KEY_STORAGE == 1)
         (void)AESCBCXXF3HSM_freeAllAssets(handle);
+    #endif
     }
 #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
         */
 
     object->input  = NULL;
@@ -996,7 +1020,8 @@ int_fast16_t AESCBC_cancelOperation(AESCBC_Handle handle)
     return AESCBC_STATUS_SUCCESS;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 
 /*
  *  ======== AESCBCXXF3HSM_oneStepOperation ========
@@ -1047,9 +1072,72 @@ static int_fast16_t AESCBCXXF3HSM_oneStepOperation(AESCBC_Handle handle,
      */
     (void)memcpy((void *)&object->iv[0], (void *)operation->iv, sizeof(object->iv));
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When input or output is in PSRAM and exceeds the bounce slot, split into
+     * block-aligned chunks. For both encrypt and decrypt, the IV for the next
+     * chunk is read from the result token by processData post-processing and
+     * stored in object->iv, so continuity is maintained automatically.
+     */
+
+    /* Calculate maximum chunk size, based on input/output locations and
+     * input/output bounce buffer sizes. If the input address is in internal
+     * memory, the input bounce buffer size is irrelevant, and is set to maximum
+     * for the calculation, and the same logic applies to the output.
+     * If either sizes get set to 0, the operation can not be completed, and an
+     * error is returned.
+     */
+    size_t inputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->input) ? HSMXXF3_inputBounce.size : SIZE_MAX;
+
+    size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->output) ? HSMXXF3_outputBounce.size : SIZE_MAX;
+
+    if (inputBounceSize == 0 || outputBounceSize == 0)
+    {
+        return AESCBC_STATUS_ERROR;
+    }
+
+    size_t minBounceSize = Math_MIN(inputBounceSize, outputBounceSize);
+
+    size_t maxChunkSize = minBounceSize & ~(AES_BLOCK_SIZE - 1U);
+
+    if ((object->inputLength > maxChunkSize) &&
+        (XMEMWFF3_isAddrExternal((uintptr_t)object->input) || XMEMWFF3_isAddrExternal((uintptr_t)object->output)))
+    {
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
+        }
+
+        uint8_t *chunkInput   = (uint8_t *)operation->input;
+        uint8_t *chunkOutput  = operation->output;
+        size_t remainingBytes = operation->inputLength;
+
+        while (remainingBytes > 0U)
+        {
+            int_fast16_t chunkStatus;
+            size_t chunkSize = (remainingBytes > maxChunkSize) ? maxChunkSize : remainingBytes;
+
+            object->input       = chunkInput;
+            object->output      = chunkOutput;
+            object->inputLength = chunkSize;
+
+            chunkStatus = AESCBCXXF3HSM_processData(handle);
+            if (chunkStatus != AESCBC_STATUS_SUCCESS)
+            {
+                return chunkStatus;
+            }
+
+            chunkInput += chunkSize;
+            chunkOutput += chunkSize;
+            remainingBytes -= chunkSize;
+        }
+        return AESCBC_STATUS_SUCCESS;
+    }
+    #endif
+
     return AESCBCXXF3HSM_processData(handle);
 }
 
+    #if (ENABLE_KEY_STORAGE == 1)
 /*
  *  ======== AESCBCXXF3HSM_freeAllAssets ========
  */
@@ -1082,6 +1170,7 @@ static int_fast16_t AESCBCXXF3HSM_freeAllAssets(AESCBC_Handle handle)
 
     return status;
 }
+    #endif
 
 /*
  *  ======== AESCBCXXF3HSM_OneStepPostProcessing ========
@@ -1107,10 +1196,12 @@ static inline void AESCBCXXF3HSM_OneStepPostProcessing(uintptr_t arg0)
     /* Free all assets. This includes key-related asset and state-related asset
      * (temporary asset).
      */
+    #if (ENABLE_KEY_STORAGE == 1)
     if (AESCBCXXF3HSM_freeAllAssets(handle) != AESCBC_STATUS_SUCCESS)
     {
         status = AESCBC_STATUS_ERROR;
     }
+    #endif
 
     object->common.returnStatus = status;
 
@@ -1296,6 +1387,68 @@ int_fast16_t AESCBCXXF3HSM_addData(AESCBC_Handle handle, AESCBC_SegmentedOperati
     object->output      = operation->output;
     object->inputLength = operation->inputLength;
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When input or output is in PSRAM and exceeds the bounce slot, split into
+     * block-aligned chunks. The IV for the next chunk is read from the result
+     * token by processData post-processing and stored in object->iv, so CBC
+     * continuity is maintained automatically across chunks.
+     */
+
+    /* Calculate maximum chunk size, based on input/output locations and
+     * input/output bounce buffer sizes. If the input address is in internal
+     * memory, the input bounce buffer size is irrelevant, and is set to maximum
+     * for the calculation, and the same logic applies to the output.
+     * If either sizes get set to 0, the operation can not be completed, and an
+     * error is returned.
+     */
+    size_t inputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->input) ? HSMXXF3_inputBounce.size : SIZE_MAX;
+
+    size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->output) ? HSMXXF3_outputBounce.size : SIZE_MAX;
+
+    if (inputBounceSize == 0 || outputBounceSize == 0)
+    {
+        return AESCBC_STATUS_ERROR;
+    }
+
+    size_t minBounceSize = Math_MIN(inputBounceSize, outputBounceSize);
+
+    size_t maxChunkSize = minBounceSize & ~(AES_BLOCK_SIZE - 1U);
+
+    if ((object->inputLength > maxChunkSize) &&
+        (XMEMWFF3_isAddrExternal((uintptr_t)object->input) || XMEMWFF3_isAddrExternal((uintptr_t)object->output)))
+    {
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
+        }
+
+        uint8_t *chunkInput   = (uint8_t *)operation->input;
+        uint8_t *chunkOutput  = operation->output;
+        size_t remainingBytes = operation->inputLength;
+
+        while (remainingBytes > 0U)
+        {
+            int_fast16_t chunkStatus;
+            size_t chunkSize = (remainingBytes > maxChunkSize) ? maxChunkSize : remainingBytes;
+
+            object->input       = chunkInput;
+            object->output      = chunkOutput;
+            object->inputLength = chunkSize;
+
+            chunkStatus = AESCBCXXF3HSM_processData(handle);
+            if (chunkStatus != AESCBC_STATUS_SUCCESS)
+            {
+                return chunkStatus;
+            }
+
+            chunkInput += chunkSize;
+            chunkOutput += chunkSize;
+            remainingBytes -= chunkSize;
+        }
+        return AESCBC_STATUS_SUCCESS;
+    }
+    #endif
+
     return AESCBCXXF3HSM_processData(handle);
 }
 
@@ -1344,7 +1497,78 @@ int_fast16_t AESCBCXXF3HSM_finalize(AESCBC_Handle handle, AESCBC_SegmentedOperat
         object->output      = operation->output;
         object->inputLength = operation->inputLength;
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        /* When input or output is in PSRAM and exceeds the bounce slot, split into
+         * block-aligned chunks. The IV for the next chunk is read from the result
+         * token by processData post-processing and stored in object->iv, so CBC
+         * continuity is maintained automatically across chunks.
+         */
+
+        /* Calculate maximum chunk size, based on input/output locations and
+         * input/output bounce buffer sizes. If the input address is in internal
+         * memory, the input bounce buffer size is irrelevant, and is set to maximum
+         * for the calculation, and the same logic applies to the output.
+         * If either sizes get set to 0, the operation can not be completed, and an
+         * error is returned.
+         */
+        size_t inputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->input) ? HSMXXF3_inputBounce.size
+                                                                                   : SIZE_MAX;
+
+        size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)object->output) ? HSMXXF3_outputBounce.size
+                                                                                     : SIZE_MAX;
+
+        if (inputBounceSize == 0 || outputBounceSize == 0)
+        {
+            return AESCBC_STATUS_ERROR;
+        }
+
+        size_t minBounceSize = Math_MIN(inputBounceSize, outputBounceSize);
+
+        size_t maxChunkSize = minBounceSize & ~(AES_BLOCK_SIZE - 1U);
+
+        if ((object->inputLength > maxChunkSize) &&
+            (XMEMWFF3_isAddrExternal((uintptr_t)object->input) || XMEMWFF3_isAddrExternal((uintptr_t)object->output)))
+        {
+            if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+            {
+                status = AESCBC_STATUS_FEATURE_NOT_SUPPORTED;
+            }
+            else
+            {
+                uint8_t *chunkInput   = (uint8_t *)operation->input;
+                uint8_t *chunkOutput  = operation->output;
+                size_t remainingBytes = operation->inputLength;
+
+                status = AESCBC_STATUS_SUCCESS;
+                while (remainingBytes > 0U)
+                {
+                    int_fast16_t chunkStatus;
+                    size_t chunkSize = (remainingBytes > maxChunkSize) ? maxChunkSize : remainingBytes;
+
+                    object->input       = chunkInput;
+                    object->output      = chunkOutput;
+                    object->inputLength = chunkSize;
+
+                    chunkStatus = AESCBCXXF3HSM_processData(handle);
+                    if (chunkStatus != AESCBC_STATUS_SUCCESS)
+                    {
+                        status = chunkStatus;
+                        break;
+                    }
+
+                    chunkInput += chunkSize;
+                    chunkOutput += chunkSize;
+                    remainingBytes -= chunkSize;
+                }
+            }
+        }
+        else
+        {
+            status = AESCBCXXF3HSM_processData(handle);
+        }
+    #else
         status = AESCBCXXF3HSM_processData(handle);
+    #endif
     }
     else /* Operation was finalized without additional data to process */
     {

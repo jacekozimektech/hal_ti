@@ -847,7 +847,7 @@ void scanDigestTable_SaveResult(TScanFrameInfo*            pFrame,
                                  cmeScanDigestResult_t*     pEntry)
 
 {
-    uint16_t secType;
+    uint32_t secType;
     uint16_t ieLen;
     //update channel;
     pEntry->result.mChannel = pFrame->pParsedIEs->dsParams.currChannel;
@@ -931,7 +931,7 @@ void scanDigestTable_SaveExtendedResult(TScanFrameInfo*            pFrame,
                                  uint32_t                     score,
                                  cmeExtendedScanDigestResult_t*     pEntry)
 {
-    uint16_t secType;
+    uint32_t secType;
        uint16_t ieLen;
 
        //update channel;

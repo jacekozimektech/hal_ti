@@ -53,16 +53,6 @@
 
 #define CHANNEL_VALIDITY_TS_THRESHOLD   10000   /*10 seconds*/
 
-/*
-* macro to convert Dbm units into Dbm/10 units. This macro is important
-* in order to avoid over-flow of Dbm units bigger than 25
-*/
-#define DBM2DBMDIV10(uTxPower) \
-	    ((uTxPower) > (MAX_TX_POWER / DBM_TO_TX_POWER_FACTOR) ? \
-		MAX_TX_POWER : (uTxPower) * DBM_TO_TX_POWER_FACTOR)
-
-#define DBM_DIV_10_2_DBM(uTxPower) (uTxPower / DBM_TO_TX_POWER_FACTOR)
-
 #define TIW_REG_DOMAIN_DFS 0x00000001
 #define TIW_REG_DOMAIN_HT40PLUS 0x00000002
 #define TIW_REG_DOMAIN_HT40MINUS 0x00000004
@@ -72,7 +62,7 @@ typedef struct
     Bool32    channelValidityPassive; /*TI_TRUE-valid, TI_FALSE-invalid */
     Bool32    channelValidityActive; /*TI_TRUE-valid, TI_FALSE-invalid */
     uint32_t  uFlags;
-    uint8_t   uMaxTxPowerDomain;     /*
+    int8_t    uMaxTxPowerDomain;     /*
 									  * Holds ONLY the default limitation (Application) 
 									  * or according to 11d country code IE	
 									  * Updated on init phase or upon receiving new country code IE				  
@@ -106,7 +96,7 @@ int32_t regulatoryDomain_setSupportedChannelsAccording2CountryIe(dot11_COUNTRY_t
 																 Bool32 band_2_4,
 																 Bool32 updateFw);
 int32_t regulatoryDomain_SetCountry(uint8_t *pCountryStr);
-Bool_e  regulatoryDomain_getChMaxPower(uint16_t channel, uint8_t *max_tx_power);
+Bool_e  regulatoryDomain_getChMaxPower(uint16_t channel, int8_t *max_tx_power);
 void 	regulatoryDomain_setFwMaxTxPower(int8_t maxTxPower);
 void	regulatoryDomain_setRoleMaxTxPower(ti_driver_ifData_t *pDrv,
 										   int8_t maxTxPower);

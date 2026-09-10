@@ -1,6 +1,6 @@
 /*
  *  Copyright The Mbed TLS Contributors
- *  Copyright 2025, Texas Instruments Incorporated
+ *  Copyright (c) 2025-2026 Texas Instruments Incorporated
  *  SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -25,86 +25,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ti/drivers/psa/ti_psa_crypto_aead_types.h>
+
 #if ((TFM_ENABLED == 1) && !defined(TFM_BUILD))
     #include <third_party/tfm/interface/include/psa/crypto.h>
 #else
     #include <third_party/mbedtls/include/psa/crypto.h>
 #endif
-#include <ti/drivers/cryptoutils/cryptokey/CryptoKey.h>
-#include <ti/devices/DeviceFamily.h>
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-    #include <ti/drivers/aesccm/AESCCMXXF3.h>
-    #include <ti/drivers/aesgcm/AESGCMXXF3HSM.h>
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X2_CC26X2) || \
-       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4))
-    #include <ti/drivers/aesccm/AESCCMCC26XX.h>
-    #include <ti/drivers/aesgcm/AESGCMCC26XX.h>
-#endif
 
-struct ti_psa_aead_operation_s
-{
-    union
-    {
-        struct
-        {
-            AESCCM_Config aesccmConfig;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-            AESCCMXXF3_Object aesccmObject;
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X2_CC26X2) || \
-       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4))
-            AESCCMCC26XX_Object aesccmObject;
-#endif
-        } aesccm;
-        struct
-        {
-            AESGCM_Config aesgcmConfig;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-            AESGCMXXF3HSM_Object aesgcmObject;
-#elif ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X2_CC26X2) || \
-       (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4))
-            AESGCMCC26XX_Object aesgcmObject;
-#endif
-        } aesgcm;
-    } driver;
-    /* Used to mark the operation struct as ready.*/
-    unsigned int id;
-    psa_algorithm_t alg;
-    unsigned int iv_set:1;
-    unsigned int in_error_state:1;
-    size_t adLength;
-    size_t plaintextLength;
-    size_t runningADLength;
-    size_t runningPlaintextLength;
-    size_t tagSize;
-
-    /* Buffer for data that has not been processed yet. Word-aligned for max
-     * performance and in case any drivers require aligned input buffer.
-     * Double-buffer is used when PSA crypto is built into the TFM to prevent
-     * corruption before the data can be consumed since the underlying crypto
-     * drivers are used in callback mode. */
-#ifdef TFM_BUILD
-    uint8_t unprocessedData[PSA_BLOCK_CIPHER_BLOCK_MAX_SIZE * 2] __attribute__((aligned(4)));
-#else
-    uint8_t unprocessedData[PSA_BLOCK_CIPHER_BLOCK_MAX_SIZE] __attribute__((aligned(4)));
-#endif /* TFM_BUILD */
-
-    /* Pointer to the current unprocessed data */
-    uint8_t *curr_unprocessed_data;
-
-    size_t unprocessed_len;
-
-    CryptoKey cryptoKey;
-    bool done_updating_ad;
-    bool length_set;
-};
-
-typedef struct ti_psa_aead_operation_s ti_psa_aead_operation_t;
-
-#define TI_PSA_AEAD_OPERATION_INIT \
-    (ti_psa_aead_operation_t)      \
-    {                              \
-        0                          \
-    }
 static inline struct ti_psa_aead_operation_s ti_psa_aead_operation_init(void)
 {
     const struct ti_psa_aead_operation_s v = TI_PSA_AEAD_OPERATION_INIT;

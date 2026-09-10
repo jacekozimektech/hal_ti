@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2024, Texas Instruments Incorporated
+ * Copyright (c) 2017-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -771,6 +771,7 @@ void AESECB_Operation_init(AESECB_Operation *operationStruct);
  *  @retval #AESECB_STATUS_ERROR                 The operation failed.
  *  @retval #AESECB_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
  *  @retval #AESECB_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
+ *  @retval #AESECB_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *
  *  @sa     AESECB_oneStepDecrypt()
  */
@@ -793,6 +794,7 @@ int_fast16_t AESECB_oneStepEncrypt(AESECB_Handle handle, AESECB_Operation *opera
  *  @retval #AESECB_STATUS_ERROR                 The operation failed.
  *  @retval #AESECB_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
  *  @retval #AESECB_STATUS_UNALIGNED_IO_NOT_SUPPORTED  The input and/or output buffer were not word-aligned.
+ *  @retval #AESECB_STATUS_FEATURE_NOT_SUPPORTED The requested operation is not supported by this implementation.
  *
  *  @sa     AESECB_oneStepEncrypt()
  */

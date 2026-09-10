@@ -149,7 +149,7 @@ typedef struct
     uint8_t       mBssid[MAC_ADDR_LEN];
     uint8_t       mSsidLen;
     int8_t        mRSSI;
-    uint16_t      mSecurityType;
+    uint32_t      mSecurityType;
     uint8_t       mChannel;
 }cmeNetworkEntryResult_t;
 
@@ -163,7 +163,7 @@ typedef struct
     uint8_t       mBssid[MAC_ADDR_LEN];
     uint8_t       mSsidLen;
     int8_t        mRSSI;
-    uint16_t      mSecurityType;
+    uint32_t      mSecurityType;
     uint8_t       mChannel;
 
     uint16_t       mRatesLen;//Rates

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2026, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -45,6 +45,7 @@
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/Power.h>
 #include <ti/drivers/dma/DMAWFF3.h>
+#include <ti/drivers/xmem/XMEMWFF3.h>
 
 #include <ti/drivers/uart2/UART2WFF3.h>
 #include <ti/drivers/uart2/UART2Support.h>
@@ -72,9 +73,36 @@
 /* Macro for using the definition of the UART2 Log module */
 Log_MODULE_USE(LogModule_UART2);
 
-/* Options for DMA write and read */
+/* Options for DMA for UART TX and UART RX */
 #define TX_CONTROL_OPTS (DMA_CONFIG_DST_PTR_FIFO | DMA_CONFIG_CLEAR_AT_JOB_START | DMA_CONFIG_TX)
 #define RX_CONTROL_OPTS (DMA_CONFIG_SRC_PTR_FIFO | DMA_CONFIG_CLEAR_AT_JOB_START | DMA_CONFIG_RX)
+
+/* Use max arbitration rate by setting minimal block size of one word for both
+ * UART TX and UART RX.
+ * The RX arbitration size cannot be changed without also changing the RX FIFO
+ * interrupt level (See comment for RX_FIFO_INT_LEVEL).
+ */
+#define TX_DMA_BLOCK_SIZE (1)
+#define RX_DMA_BLOCK_SIZE (1)
+
+/* Generate TX DMA request when the TX FIFO contains 4 out of 8 bytes or less.
+ */
+#define TX_FIFO_INT_LEVEL (UART_FIFO_TX4_8)
+
+/* Generate RX DMA request when the RX FIFO contains 2 out of 8 bytes or more.
+ * With the block size of 1 (see TX_DMA_BLOCK_SIZE), this guarantees that the
+ * DMA will always leave at least one byte in the FIFO. Which it needed for the
+ * RX receive timeout to trigger, which the driver depends on.
+ * This value should remain as small as possible to make the difference between
+ * this and RX_FIFO_INT_LEVEL_MAX as large as possible. See comment in
+ * UART2Support_dmaStopRx().
+ */
+#define RX_FIFO_INT_LEVEL (UART_FIFO_RX2_8)
+
+/* The maximum possible RX FIFO interrupt level. This is used during the DMA
+ * abort sequence in UART2Support_dmaStopRx().
+ */
+#define RX_FIFO_INT_LEVEL_MAX (UART_FIFO_RX6_8)
 
 /* Maximum number of bytes that DMA can transfer */
 #define MAX_DMA_SIZE HOST_DMA_CH0TCTL_TRANSB_M
@@ -243,6 +271,10 @@ void UART2_close(UART2_Handle handle)
     /* Release power dependency - i.e. potentially power down serial domain. */
     Power_releaseDependency(hwAttrs->powerID);
 
+    XMEMWFF3_close(object->psramHandleTX);
+    XMEMWFF3_close(object->psramHandleRX);
+    XMEMWFF3_close(object->flashHandleTX);
+
     object->state.opened = false;
 }
 
@@ -321,6 +353,60 @@ UART2_Handle UART2_open(uint_least8_t index, UART2_Params *params)
     object->state.opened = true;
 
     HwiP_restore(key);
+
+    object->psramHandleRX = NULL;
+    object->psramHandleTX = NULL;
+    object->flashHandleTX = NULL;
+
+    if ((hwAttrs->usePsram) || (hwAttrs->useFlash))
+    {
+        XMEMWFF3_init();
+    }
+
+    if (hwAttrs->usePsram)
+    {
+        XMEM_Params UART2_XMEMParams;
+        UART2_XMEMParams.regionBase      = 0x0;                 /* Physical address, not relevant for PSRAM */
+        UART2_XMEMParams.regionStartAddr = EXT_PSRAM_BASE;      /* Start address of PSRAM */
+        UART2_XMEMParams.regionSize      = XMEM_MAX_PSRAM_SIZE; /* Size of region, set to maximum */
+        UART2_XMEMParams.deviceNum       = XMEM_MEM_PSRAM;
+
+        object->psramHandleRX = XMEMWFF3_open(&UART2_XMEMParams);
+
+        if (object->psramHandleRX == NULL)
+        {
+            object->state.opened = false;
+            return NULL;
+        }
+
+        object->psramHandleTX = XMEMWFF3_open(&UART2_XMEMParams);
+
+        if (object->psramHandleTX == NULL)
+        {
+            XMEMWFF3_close(object->psramHandleRX);
+            object->state.opened = false;
+            return NULL;
+        }
+    }
+
+    if (hwAttrs->useFlash)
+    {
+        XMEM_Params UART2_XMEMParams;
+        UART2_XMEMParams.regionBase      = 0x0;
+        UART2_XMEMParams.regionStartAddr = EXT_FLASH_SEC_BASE;
+        UART2_XMEMParams.regionSize      = XMEM_MAX_FLASH_SIZE;
+        UART2_XMEMParams.deviceNum       = XMEM_MEM_FLASH;
+
+        object->flashHandleTX = XMEMWFF3_open(&UART2_XMEMParams);
+
+        if (object->flashHandleTX == NULL)
+        {
+            XMEMWFF3_close(object->psramHandleRX);
+            XMEMWFF3_close(object->psramHandleTX);
+            object->state.opened = false;
+            return NULL;
+        }
+    }
 
     object->state.rxEnabled       = false;
     object->state.txEnabled       = false;
@@ -501,7 +587,7 @@ void UART2Support_dmaStartRx(UART2_Handle handle)
          * Use max arbitration rate by setting minimal block size of one word.
          * Set minimal word size of one byte.
          */
-        DMAWFF3_configureChannel(dmaChannel, 1, DMA_WORD_SIZE_1B, RX_CONTROL_OPTS);
+        DMAWFF3_configureChannel(dmaChannel, RX_DMA_BLOCK_SIZE, DMA_WORD_SIZE_1B, RX_CONTROL_OPTS);
 
         /* Enable selected DMA channel */
         DMAWFF3_startTransaction(dmaChannel, srcAddr, (uint32_t *)dstAddr, object->rxSize, false);
@@ -572,7 +658,7 @@ void UART2Support_dmaStartTx(UART2_Handle handle)
          * Use max arbitration rate by setting a block size of one word (value = 1).
          * Set word size of one byte.
          */
-        DMAWFF3_configureChannel(dmaChannel, 1, DMA_WORD_SIZE_1B, TX_CONTROL_OPTS);
+        DMAWFF3_configureChannel(dmaChannel, TX_DMA_BLOCK_SIZE, DMA_WORD_SIZE_1B, TX_CONTROL_OPTS);
 
         uartDmaEnable(hwAttrs->baseAddr, UART_DMA_TX);
 
@@ -606,36 +692,91 @@ void UART2Support_dmaStopRx(UART2_Handle handle)
     /* If there is a currently active DMA RX transaction */
     if (object->rxSize > 0)
     {
-        /* Disable the UART DMA controller and the DMA channel to stop the transfer */
-        UARTDisableDma(hwAttrs->baseAddr, UART_DMA_RX);
-
-        /* Make sure the DMA transfer is finished before disabling. Check the
-         * DMA channel FSM State.
+        /* If the DMA transaction is aborted exactly at the same time as new
+         * data arrives which causes the RX FIFO to cross the configured FIFO
+         * threshold, then it is possible that the DMA controller consumes a
+         * byte without correctly updating the state register, which leads to a
+         * lost byte.
+         *
+         * To prevent this, the FIFO threshold is temporarily set to the
+         * maximum, during the DMA abort sequence. This will ensure that the RX
+         * FIFO is below the threshold for the entire DMA abort sequence.
+         *
+         * This works under the assumption that the RX FIFO is always at most
+         * TX_FIFO_INT_LEVEL full, since the DMA is significantly faster than
+         * the UART, and the DMA is always enabled when RX is enabled, except
+         * for brief periods where the DMA is stopped before it is re-started
+         * shortly after.
+         *
+         * The sequence to Abort the DMA RX transaction is as follows:
+         *  1. Set the RX FIFO threshold to the maximum (RX_FIFO_INT_LEVEL_MAX).
+         *  2. Wait for the DMA FSM state to be either PENDING_ARB or IDLE.
+         *  3. If the DMA FSM state is PENDING_ARB, then:
+         *     a. Abort the DMA RX transaction.
+         *     b. Wait for the DMA FSM state to be ABORT.
+         *     c. Read the number of bytes remaining in the DMA RX transaction
+         *        This needs to be done before the step below to ensure a valid
+         *        value is read.
+         *     d. Initialize the DMA RX channel.
+         *  4. Else if the DMA state is IDLE
+         *     a. No need to abort the DMA RX transaction, but still need to
+         *        read the number of bytes remaining in the DMA RX transaction
+         *  5. Set the RX FIFO threshold back to normal (RX_FIFO_INT_LEVEL).
          */
+
+        /* 1. Set the RX FIFO threshold to the maximum. */
+        UARTSetFifoLevel(hwAttrs->baseAddr, TX_FIFO_INT_LEVEL, RX_FIFO_INT_LEVEL_MAX);
+
+        /* 2. Wait for the DMA FSM state to be either PENDING_ARB or IDLE. */
         fsmState = DMAGetChannelFSMState(rxDmaChannel);
-        while ((fsmState == DMA_FSMSTATE_DRAIN) || (fsmState == DMA_FSMSTATE_COPY) || (fsmState == DMA_FSMSTATE_LAST))
+        while ((fsmState != DMA_FSMSTATE_PENDING_ARB) && (fsmState != DMA_FSMSTATE_IDLE))
         {
             fsmState = DMAGetChannelFSMState(rxDmaChannel);
         }
 
-        DMAWFF3_disableChannel(rxDmaChannel);
+        /* 3. Check the DMA FSM state. */
+        if (fsmState == DMA_FSMSTATE_PENDING_ARB)
+        {
+            /* 3.a. Abort the DMA RX transaction. */
+            DMAWFF3_disableChannel(rxDmaChannel);
+
+            /* 3.b. Wait for the DMA FSM state to be ABORT. */
+            while (DMAGetChannelFSMState(rxDmaChannel) != DMA_FSMSTATE_ABORT) {}
+
+            /* 3.c. Read the number of bytes remaining in the DMA RX
+             *      transaction.
+             */
+            bytesRemaining = DMAWFF3_getRemainingBytes(rxDmaChannel);
+
+            /* 3.d. Initialize the DMA RX channel. */
+            DMAWFF3_initChannel(rxDmaChannel);
+        }
+        else
+        {
+            /* 4.a. Read the number of bytes remaining in the DMA RX
+             *      transaction.
+             */
+            bytesRemaining = DMAWFF3_getRemainingBytes(rxDmaChannel);
+        }
+
+        /* 5. Set the RX FIFO threshold back to normal. */
+        UARTSetFifoLevel(hwAttrs->baseAddr, TX_FIFO_INT_LEVEL, RX_FIFO_INT_LEVEL);
+
+        /* Disable UART from generating DMA requests */
+        uartDmaDisable(hwAttrs->baseAddr, UART_DMA_RX);
 
         /* Disable and clear interrupts */
         DMAWFF3_clearInterrupt(1 << rxDmaChannel);
         UARTDisableInt(hwAttrs->baseAddr, UART_INT_RXDMADONE);
         UARTClearInt(hwAttrs->baseAddr, UART_INT_RXDMADONE);
 
-        /* Get the number of bytes that remain to be transferred */
-        bytesRemaining = DMAWFF3_getRemainingBytes(rxDmaChannel);
-        rxCount        = object->rxSize - bytesRemaining;
+        /* Compute number of bytes transferred. */
+        rxCount = object->rxSize - bytesRemaining;
 
         Log_printf(LogModule_UART2,
-                   Log_VERBOSE,
-                   "UART2Support_dmaStopRx: Stop DMA transfer. Remaining number of bytes: %d",
-                   bytesRemaining);
-
-        /* Initialize DMA channel */
-        DMAWFF3_initChannel(rxDmaChannel);
+                    Log_VERBOSE,
+                    "UART2Support_dmaStopRx: Stop DMA transfer. Remaining number of bytes: %d",
+                    bytesRemaining);
 
         /* If the driver is currently reading data into the ring buffer, update the ring buffer count with the
          * number of bytes transferred into it through DMA
@@ -646,6 +787,10 @@ void UART2Support_dmaStopRx(UART2_Handle handle)
             Log_printf(LogModule_UART2, Log_VERBOSE,
                        "UART2Support_dmaStopRx: Data read into ring buffer by DMA: %d byte(s)",
                        rxCount);
+            if (rxCount > 0)
+            {
+                object->state.receiveTimeoutOccurred = false;
+            }
         }
         else
         {
@@ -877,6 +1022,7 @@ static void UART2WFF3_hwiIntRead(uintptr_t arg, uint32_t status)
         if (object->state.readToRingbuf)
         {
             UART2WFF3_getRxData(handle, RingBuf_space(&object->rxBuffer));
+            object->state.receiveTimeoutOccurred = true;
         }
     }
 
@@ -1101,10 +1247,8 @@ static void UART2WFF3_initHw(UART2_Handle handle)
                  UART_INT_OE | UART_INT_BE | UART_INT_PE | UART_INT_FE | UART_INT_RT | UART_INT_TX | UART_INT_RX |
                      UART_INT_CTS | UART_INT_TXDMADONE | UART_INT_RXDMADONE);
 
-    /* Set TX interrupt FIFO level and RX interrupt FIFO level.
-     * For best performance in RX, the FIFO level should be kept at 2/8.
-     */
-    UARTSetFifoLevel(hwAttrs->baseAddr, UART_FIFO_TX4_8, UART_FIFO_RX2_8);
+    /* Set TX interrupt FIFO level and RX interrupt FIFO level. */
+    UARTSetFifoLevel(hwAttrs->baseAddr, TX_FIFO_INT_LEVEL, RX_FIFO_INT_LEVEL);
 
     /* If Flow Control is enabled, configure hardware flow control for CTS and/or RTS. */
     if (UART2WFF3_isFlowControlEnabled(hwAttrs) && (hwAttrs->ctsPin != GPIO_INVALID_INDEX))

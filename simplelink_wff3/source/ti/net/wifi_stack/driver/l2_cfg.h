@@ -388,9 +388,10 @@ typedef struct
 // Default values are stated in () for every parameter
 typedef struct
 {
-    uint8_t  supportedBandsBM;          // bitmask, based on RadioBand_e
-                                      // Different roles may support a subset of this mask.
-
+    uint32_t deviceSupportedBandsBM;  // bitmask, based on RadioBand_e indicate bands capability of device,
+                                      // set by INI configurations and fuses
+    Bool_e iniIs5GHzEnabled;          // indicates INI user-configuration support of 5 GHz
+    Bool_e iniMixedModeEnabled;       // indicates INI user-configuration support of mixed mode security type
     Bool_e dot11nEnabled;             // (TRUE) indicates device supports 11n features
     Bool_e band40MHzEnabled;          // (FALSE) indicates device supports 40MHz
     Bool_e mimoEnabled;               // (FALSE) used for adding MCS 8-15 to HT capabilities & device capabilities
@@ -406,7 +407,6 @@ typedef struct
 
     heDebugParams_t heParams;
     uint8_t     heSupport;                  // Supports HE or not. true/false
-
 } l2CfgCommon_t;
 
 
@@ -792,6 +792,20 @@ uint16_t cfgGetFragThreshold();
 
 Bool32 l2_cfg_is5GhzSupported(void);
 
+
+/*----------------------------------------------------------------------------
+ * l2_cfg_isMixedModeSupported
+ *      This function checks whether the device supports mixed mode security
+ *      type (WPA2/WPA3).
+
+ * Parameters:
+ *     none
+
+ * return: TRUE if device supports mixed mode security, FALSE otherwise
+
+---------------------------------------------------------------------------- */
+Bool32 l2_cfg_isMixedModeSupported(void);
+
 // ============================================================================
 //      The APIs below are used for fetching STA based configurations
 // ============================================================================
@@ -1087,14 +1101,17 @@ Return: band_cfg
 uint8_t l2_GetPhyConfig();
 
 /* ----------------------------------------------------------------------------
- l2_cfg_get5GhzSupport
-      Gets 5GHz support status
+ l2_cfg_setDevice5GhzSupport
+      Configure whether the device supports 5 GHz or not and store configuration
+      in a retrievable global variable.
+      5 GHz support is indicated by reading the device fuses and reading the
+      according INI configuration.
 
- Parameters: is5GhzSupported - Input buffer to return status
+ Parameters: none
 
 Return: negative value on error, 0 otherwise
 ---------------------------------------------------------------------------- */
-int8_t l2_cfg_get5GhzSupport(uint8_t *is5GhzSupported);
+int8_t l2_cfg_setDevice5GhzSupport();
 
 
 /* ----------------------------------------------------------------------------
@@ -1112,4 +1129,25 @@ void cfgSetApSaeAntiCloggingThreshold(uint8_t apSaeAntiCloggingThreshold);
 Return: AP SAE anti-clogging threshold
 ---------------------------------------------------------------------------- */
 uint8_t cfgGetApSaeAntiCloggingThreshold(void);
+
+/* ----------------------------------------------------------------------------
+ cfgGetDeviceSupportedBandsBM
+      Get the bitmask of the user-config (INI) and device fuses bands support
+
+ Parameters: none
+
+Return: supported bands bitmask (based on RadioBand_e enum)
+---------------------------------------------------------------------------- */
+uint32_t cfgGetDeviceSupportedBandsBM();
+
+/* ----------------------------------------------------------------------------
+ cfgSetDeviceSupportedBandsBM
+      Set the bitmask of the user-config (INI) and device fuses bands support
+
+ Parameters: supported bands bitmask (based on RadioBand_e enum)
+
+Return: none
+---------------------------------------------------------------------------- */
+void cfgSetDeviceSupportedBandsBM(uint32_t supportedBandsBM);
+
 #endif // _L2_CFG_H_

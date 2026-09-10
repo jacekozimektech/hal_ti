@@ -78,7 +78,6 @@ uint32_t  txDataQ_AllocCheckResources (TTxCtrlBlk *pPktCtrlBlk, uint8_t isDataFr
 void      txDataQ_FreeResources       (TTxCtrlBlk *pPktCtrlBlk);
 void      txDataQ_FreeFwAllocated     (TTxCtrlBlk *pPktCtrlBlk);
 void      txDataQ_FlushLinkQueues     (uint32_t uHlid);
-int32_t   txDataQ_GetCountPendTXData();
 void      txDataQ_noticeRemoveHlid  ();
 
 

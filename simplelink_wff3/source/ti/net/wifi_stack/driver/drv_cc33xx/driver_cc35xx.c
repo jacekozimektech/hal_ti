@@ -85,7 +85,9 @@ extern  OsiSyncObj_t            ScanResultTableSyncObj_ull;
 
 extern  WlanScanDwellTime_t scanDwellTimeParams;
 extern ti_driver_ifData_t * getDriverForRoleId(uint32_t aRoleId, struct wpa_global *apGlobal);
+#ifndef TI_STA_ONLY_BUILD
 extern int cc3xxx_trnspt_cmd_if_sta_remove(void *apPriv, const u8 *apAddr);
+#endif
 extern int WLSendFW_DebugCommand(uint32_t id, void *cmd, uint32_t len, void *out, uint32_t outLen);
 // ============================================================================
 //		 Functions declarations which are not interface
@@ -120,7 +122,9 @@ int cc3xxx_trnspt_cmd_if_one_shot_scan(void *apPriv, struct wpa_driver_scan_para
 int cc3xxx_trnspt_cmd_if_sched_scan(void *apPriv, struct wpa_driver_scan_params *apParams);
 int cc3xxx_trnspt_cmd_if_site_survey(uint8_t roleID, CMEWlanScanCommon_t* pScanCommon) ;//wlan_scan command
 int8_t cc3xxx_trnspt_cmd_if_stop_sched_scan(void *apPriv);
+#ifndef TI_STA_ONLY_BUILD
 int cc3xxx_trnspt_cmd_if_sta_remove(void *apPriv, const uint8_t *apAddr);
+#endif
 
 
 // ============================================================================
@@ -278,7 +282,7 @@ void trnspt_cmd_get_mac_addr(uint8_t *macAddr, RoleType_e aRoleType)
     }
     else if (ROLE_IS_TYPE_P2P(aRoleType))//P2P GO or P2P CL
     {
-        IRQ_UtilCopyMacAddress((uint8_t *)&g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_STA], macAddr);
+        IRQ_UtilCopyMacAddress((uint8_t *)&g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_AP], macAddr);
     }
     else if (ROLE_IS_TYPE_DEVICE(aRoleType))//Device -- off-channel device interface
     {
@@ -447,6 +451,7 @@ int cc3xxx_trnspt_cmd_if_set_peer_state (uint8_t lid,
     return rc;
 }
 
+#ifndef TI_STA_ONLY_BUILD
 /******************************************************************************
 
     FUNCTION:		cc3xxx_trnspt_cmd_if_set_beacon_info
@@ -508,6 +513,7 @@ int cc3xxx_trnspt_cmd_if_set_beacon_info(uint32_t aRoleId,
 
     return rc;
 }
+#endif // TI_STA_ONLY_BUILD
 
 // ============================================================================
 //      Roles APIs
@@ -776,11 +782,13 @@ int cc3xxx_trnspt_cmd_if_stop_role (void *apDrv)
                         TInternalWlanLinkInfo* linkInfo;
                         wlanLinks_GetLink(uHlid, &linkInfo);
 
+#ifndef TI_STA_ONLY_BUILD
                         if (cc3xxx_trnspt_cmd_if_sta_remove(apDrv, linkInfo->info.tMacAddr) != OK)
                         {
                            ASSERT_GENERAL(0);
                            CME_CC3XX_PORT_PRINT("\n\r RemoveBssLinks(): Failed to remove STA with HLID %u from FW DB\n\r", uHlid);
                         }
+#endif
                     }
                 }
 
@@ -3024,6 +3032,7 @@ int cc3xxx_trnspt_cmd_if_config_assoc_peer(void *apDrv, PeerCap_t *aPeerCap,
     return CMD_STATUS_SUCCESS;//0;
 }
 
+#ifndef TI_STA_ONLY_BUILD
 /******************************************************************************
 
     FUNCTION:       cc3xxx_trnspt_cmd_if_sta_add
@@ -3160,7 +3169,9 @@ int cc3xxx_trnspt_cmd_if_sta_add(void *apPriv, struct hostapd_sta_add_params *ap
     return 0;
 
 }
+#endif // TI_STA_ONLY_BUILD
 
+#ifndef TI_STA_ONLY_BUILD
 /******************************************************************************
 
     FUNCTION:       cc3xxx_trnspt_cmd_if_sta_remove
@@ -3295,6 +3306,9 @@ int cc3xxx_trnspt_cmd_if_sta_remove(void *apPriv, const uint8_t *apAddr)
 
     return rc;
 }
+#endif // TI_STA_ONLY_BUILD
+
+#ifndef TI_STA_ONLY_BUILD
 /******************************************************************************
 
     FUNCTION:       cc3xxx_trnspt_cmd_if_sta_set_flags
@@ -3505,7 +3519,7 @@ int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned 
             }
 
             udata_SetRxBaPolicy(cmdReturn->linkId, 1);//enable BA policy
-            
+
             CmeApPeerConnectedNotify(cmdParams->peerInfo.configurePeer.macAddress,
                                      cmdParams->peerInfo.configurePeer.AID, wps);
 
@@ -3580,6 +3594,7 @@ int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned 
     return rc;
 
 }
+#endif // TI_STA_ONLY_BUILD
 
 void WlanEventHandler(void *pWlanFwEvent)
 {
@@ -3762,10 +3777,12 @@ const struct drv_cmd_ops cc3xxx_trnspt_cmd_if_ops = {
     .tx_param                   = cc3xxx_trnspt_cmd_if_config_tx_param,
 
     // AP related APIs
+#ifndef TI_STA_ONLY_BUILD
     .set_ap_template            = cc3xxx_trnspt_cmd_if_set_beacon_info,
     .sta_add                    = cc3xxx_trnspt_cmd_if_sta_add,
     .sta_remove                 = cc3xxx_trnspt_cmd_if_sta_remove,
     .sta_set_flags              = cc3xxx_trnspt_cmd_if_sta_set_flags,
+#endif
 
     .set_ps                     = cc3xxx_trnspt_cmd_set_ps,
 

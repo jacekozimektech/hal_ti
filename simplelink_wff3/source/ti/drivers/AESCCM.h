@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2025, Texas Instruments Incorporated
+ * Copyright (c) 2017-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -439,7 +439,8 @@
  *      // handle error
  *  }
  *
- *  #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) // and the HSM is the engine of choice
+ *  // and the HSM is the engine of choice
+ *  #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
  *
  *  CryptoKeyPlaintextHSM_initKey(&cryptoKey, keyingMaterial, sizeof(keyingMaterial));
  *

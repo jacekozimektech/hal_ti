@@ -511,6 +511,7 @@ typedef struct
 
     int8_t fwMaxTxPower; // Role`s effective max TX power, as sent to FW (dBm).
     int8_t apPowerLevel; // AP`s regulatory max TX power (dBm), including TPC for STA.
+    int8_t configuredApTxPower; // User-configured AP TX power (dBm).
 
     heMuEdcaAcParams_t apHeMuEdcaAcParams[NUM_ACCESS_CATEGORIES]; 
     dot11_ACParameters_t apAcParameters;
@@ -1444,6 +1445,18 @@ int cc33_driver_commit(void *apPriv);
  Return code:   0 on success, -1 on failure (illegal parameters)
 ---------------------------------------------------------------------------- */
 int ti_driver_set_channel(void *apPriv, struct hostapd_freq_params *apFreq);
+
+/* ----------------------------------------------------------------------------
+ ti_driver_update_channel_max_tx_power
+      Updates mode->channels[].max_tx_power for the specified channel.
+      Used to ensure Country IE reflects the configured TX power.
+
+ Parameters:    pDrv - pointer to driver instance
+                channel - channel number to update
+                max_tx_power - TX power in dBm
+ Return code:   none
+---------------------------------------------------------------------------- */
+void ti_driver_update_channel_max_tx_power(ti_driver_ifData_t *pDrv, uint8_t channel, int8_t max_tx_power);
 
 /* ----------------------------------------------------------------------------
  ti_driver_set_tx_queue_params

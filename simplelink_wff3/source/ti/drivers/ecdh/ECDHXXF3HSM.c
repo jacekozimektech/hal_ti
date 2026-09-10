@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -57,6 +57,7 @@
 #include DeviceFamily_constructPath(inc/hw_ints.h)
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    #include <ti/drivers/xmem/XMEMWFF3.h>
     /* HSM Register names for CC35XX are different compared to CC27XX
      * Below mapping helps to keep the source code same between
      * both devices.
@@ -169,6 +170,33 @@ ECDH_Handle ECDH_construct(ECDH_Config *config, const ECDH_Params *params)
         object->publicKeyAssetID  = 0U;
         object->publicDataAssetID = 0U;
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        if (XMEMWFF3_isAddrExternal((uintptr_t)object))
+        {
+            /* Callback mode is not supported when the ECDH object is in external
+             * memory because the object contains the output buffer used by the HSM.
+             */
+            if (object->returnBehavior == ECDH_RETURN_BEHAVIOR_CALLBACK)
+            {
+                object->isOpen = false;
+                return NULL;
+            }
+
+            /* The input and output bounce buffers must each be large enough to
+             * hold the ECDH component vector (P-521 worst case: 144 bytes).
+             * object->output[] is used as scratch for key material staged via
+             * stageInput before loading into HSM assets, and as the HSM output
+             * destination staged via stageOutput for the generate-public-key result.
+             */
+            if (HSMXXF3_inputBounce.size < ECDH_COMPONENT_VECTOR_LENGTH ||
+                HSMXXF3_outputBounce.size < ECDH_COMPONENT_VECTOR_LENGTH)
+            {
+                object->isOpen = false;
+                return NULL;
+            }
+        }
+#endif
+
         handle = (ECDH_Handle)config;
     }
 
@@ -197,7 +225,7 @@ void ECDH_close(ECDH_Handle handle)
     object->isOpen = false;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /* BLE stack leverages ECCParams_CurveParams, therefore, we cannot get rid of it. However, for CC35XX devices, we can
  * just rely on the curveType member in the operation struct.
  */
@@ -411,7 +439,7 @@ static int_fast16_t ECDHXXF3HSM_setECCurveParameters(ECDHXXF3HSM_Object *object)
     object->curveFamily = EIP130DOMAIN_ECC_FAMILY_NONE;
     object->domainId    = ECDH_DOMAIN_ID_SEC;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     /* Try obtaining ECC curve type by parsing through a valid curve object */
     if (ECDHXXF3HSM_getECCCurveTypeByCurve(object) != ECDH_STATUS_SUCCESS)
     {
@@ -422,7 +450,7 @@ static int_fast16_t ECDHXXF3HSM_setECCurveParameters(ECDHXXF3HSM_Object *object)
             /* If the operation's curveType value is invalid, then return an error */
             return ECDHXXF3HSM_STATUS_NO_VALID_CURVE_TYPE_PROVIDED;
         }
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     }
 #endif
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,13 @@
  *  # Hardware and Implementation Details #
  *
  *  The driver is backed by a software ECC library implementation.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #ECDSA_RETURN_BEHAVIOR_CALLBACK is not supported for
+ *  sign operations when the ECDSA driver object is placed in PSRAM.
+ *  Returns #ECDSA_STATUS_FEATURE_NOT_SUPPORTED in this case.
+ *  Use #ECDSA_RETURN_BEHAVIOR_BLOCKING or #ECDSA_RETURN_BEHAVIOR_POLLING
+ *  instead. See #HSMXXF3_BounceBuffers.
  *
  *  # Supported Curves #
  *

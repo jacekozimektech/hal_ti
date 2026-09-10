@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __PRCM_H__
-#define __PRCM_H__
+#ifndef ti_devices_prcm__include
+#define ti_devices_prcm__include
 
 //*****************************************************************************
 //
@@ -150,4 +150,4 @@ extern void PRCMSelectLFXT(void);
 //
 //*****************************************************************************
 
-#endif //  __PRCM_H__
+#endif // ti_devices_prcm__include

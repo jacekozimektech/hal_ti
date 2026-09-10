@@ -333,7 +333,7 @@ Return Value: none
  * Return - 0 on success, negative on error
  *
  */
-int rsn_rsnWpaIe2SecurityInfo(dot11_RSN_t *rsnIe, uint8_t rsnIeLen, uint16_t *securityType)
+int rsn_rsnWpaIe2SecurityInfo(dot11_RSN_t *rsnIe, uint8_t rsnIeLen, uint32_t *securityType)
 {
     int result = 0;
     struct wpa_ie_data parsedSec;
@@ -409,9 +409,16 @@ int rsn_rsnWpaIe2SecurityInfo(dot11_RSN_t *rsnIe, uint8_t rsnIeLen, uint16_t *se
         }
     }
 
-    //Key management
+    //Key management (PSK=bit0, 802.1X=bit1 — from supplicant WPA_KEY_MGMT_PSK=BIT(1), WPA_KEY_MGMT_IEEE8021X=BIT(0))
     *securityType |= ((((uint32_t)parsedSec.key_mgmt) & RSN_WLAN_SCAN_RESULT_KEY_MGMT_MASK) << RSN_WLAN_SCAN_RESULT_KEY_MGMT_POSITION);
     DRV_PRINT_REPORT("\n\r adding key mgmt securityType:0x%x", *securityType);
+
+    //SAE key management (WPA3-Personal) — supplicant WPA_KEY_MGMT_SAE=BIT(10), stored as bit2 of key_mgmt field
+    if (parsedSec.key_mgmt & (WPA_KEY_MGMT_SAE | WPA_KEY_MGMT_FT_SAE))
+    {
+        *securityType |= (RSN_WLAN_KEY_MGMT_SUITE_SAE << RSN_WLAN_SCAN_RESULT_KEY_MGMT_POSITION);
+        DRV_PRINT_REPORT("\n\r adding SAE key mgmt securityType:0x%x", *securityType);
+    }
 
 
     //Group Cipher (bit map definitions in wlan.h is shifted by 1 compared to the bitmap definitions in supplicant)
@@ -2089,7 +2096,6 @@ static void setKey(KeyAction_e aAction, securityKeys_t *apSecurityKey, const cha
     uint8_t  tkipKeyBuffer[KEY_SIZE_TKIP];
     Bool_e   isPmfEnable = FALSE;
     ti_driver_ifData_t * pDrv = drv_getDriverData(ifname);
-
 
     HOOK(HOOK_RSN);
 

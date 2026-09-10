@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,15 +36,31 @@
 #ifndef ti_drivers_xmem_XMEMWFF3__include
 #define ti_drivers_xmem_XMEMWFF3__include
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*!
- *  @brief  Device enumeration.
+ *  @brief  Memory type
+ *
+ *  This enumeration defines a type of memory. Flash and PSRAM are considered
+ *  external, and differentiated from any internal memory
+ */
+typedef enum
+{
+    XMEM_MEM_FLASH    = 0, /*<! External Flash Memory */
+    XMEM_MEM_PSRAM    = 1, /*<! External PSRAM Memory */
+    XMEM_MEM_INTERNAL = 2, /*<! Internal Memory */
+} XMEM_MemType;
+
+/*
+ *  @deprecated  Device enumeration.
+ *
+ *  These macros are defined for backwards compatibility. See #XMEM_MemType
  */
 #define XMEM_FLASH 0
 #define XMEM_PSRAM 1
@@ -87,7 +103,8 @@ extern "C" {
 /*!
  *  @brief An error status code returned by #XMEMWFF3_lock()
  *
- *  #XMEMWFF3_lock() will return this value if the @p timeout has expired
+ *  #XMEMWFF3_lock() will return this value if the @p timeout has expired.
+ *  This is currently not supported, and is reserved for future functionality.
  */
 #define XMEM_STATUS_TIMEOUT (-3)
 
@@ -120,7 +137,7 @@ extern "C" {
 /*!
  *  @brief An error status code returned by #XMEMWFF3_write()
  *
- *  #XMEMWFF3_write() will return this value if #XMEMWFF3_WRITE_PRE_VERIFY is
+ *  #XMEMWFF3_write() will return this value if #XMEM_WRITE_PRE_VERIFY is
  *  requested and a flash location can not be changed to the value
  *  desired.
  */
@@ -142,8 +159,6 @@ extern "C" {
  *  NULL pointers, or out-of-range values).
  */
 #define XMEM_STATUS_INVALID_PARAMS (-9)
-
-/** @}*/
 
 /*!
  *
@@ -217,6 +232,22 @@ extern "C" {
  */
 #define XMEM_WRITE_STIG (0x8)
 /** @} */
+
+/*!
+ *  @brief The maximum Flash size supported by the driver/device
+ *
+ *  @note The actual flash size will in most cases be smaller than this value,
+ *  but this defines the upper limit of flash size that the driver can support.
+ */
+#define XMEM_MAX_FLASH_SIZE 0x04000000U
+
+/*!
+ *  @brief The maximum PSRAM size supported by the driver/device
+ *
+ *  @note The actual PSRAM size will in most cases be smaller than this value,
+ *  but this defines the upper limit of PSRAM size that the driver can support.
+ */
+#define XMEM_MAX_PSRAM_SIZE 0x04000000U
 
 /*!
  *  @brief  Flash register structure for address-data pairs
@@ -334,7 +365,7 @@ typedef struct
     size_t regionBase;      /*!< Offset from base of Ext flash - fetched during init() */
     size_t regionStartAddr; /*!< The regionBase translated to logical address - fetched during init() */
     size_t regionSize;      /*!< The size of the region in bytes - fetched during init() */
-    size_t deviceNum;       /*!< FLASH/PSRAM */
+    XMEM_MemType deviceNum; /*!< XMEM_MEM_FLASH / XMEM_MEM_PSRAM. XMEM_MEM_INTERNAL is not supported. */
 } XMEMWFF3_Object;
 
 /*!
@@ -378,7 +409,7 @@ typedef struct XMEM_Config_
  *  @brief  Parameters for opening an XMEM region
  *
  *  This structure defines the parameters used when opening an XMEM region
- *  with XMEMWFF3_open(). It specifies the region's location, size, and
+ *  with #XMEMWFF3_open(). It specifies the region's location, size, and
  *  the associated hardware device.
  */
 typedef struct
@@ -386,7 +417,7 @@ typedef struct
     size_t regionBase;      /*!< physical Offset from base of Ext flash*/
     size_t regionStartAddr; /*!< The regionBase translated to logical address*/
     size_t regionSize;      /*!< The size of the region in bytes*/
-    uint8_t deviceNum;      /*!< FLASH/PSRAM */
+    XMEM_MemType deviceNum; /*!< XMEM_MEM_FLASH / XMEM_MEM_PSRAM. XMEM_MEM_INTERNAL is not supported. */
 } XMEM_Params;
 
 /*!
@@ -449,12 +480,8 @@ int_fast16_t XMEMWFF3_close(XMEM_Handle handle);
  *  @brief  Erase @p size bytes of the region beginning at @p offset bytes
  *  from the base of the region referenced by the #XMEM_Handle.
  *
- *  @warning Erasing internal flash on most devices can introduce
- *  significant interrupt latencies while the erase operation is in
- *  in progress. The user may want to surround certain real-time
- *  critical code sections with #XMEMWFF3_lock() and #XMEMWFF3_unlock() calls in order
- *  to prevent uncoordinated flash erase operations from negatively
- *  impacting performance.
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
  *
  *  @param   handle     A handle returned from #XMEMWFF3_open()
  *
@@ -474,6 +501,16 @@ int_fast16_t XMEMWFF3_close(XMEM_Handle handle);
  *                                       the flash sector size.
  *  @retval  #XMEM_STATUS_ERROR           If an internal error occurred
  *                                       erasing the flash.
+ *
+ *  @note   This API is blocking, and will block indefinitely until a shared
+ *          mutex is acquired.
+ *
+ *  @warning Erasing internal flash on most devices can introduce
+ *  significant interrupt latencies while the erase operation is in
+ *  in progress. The user may want to surround certain real-time
+ *  critical code sections with #XMEMWFF3_lock() and #XMEMWFF3_unlock() calls in order
+ *  to prevent uncoordinated flash erase operations from negatively
+ *  impacting performance.
  */
 int_fast16_t XMEMWFF3_erase(XMEM_Handle handle, size_t offset, size_t size);
 
@@ -540,24 +577,34 @@ void XMEMWFF3_init(void);
  *  other threads, #XMEMWFF3_unlock() must be called to allow XMEM write or erase
  *  APIs to complete.
  *
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
+ *
  *  @param  handle      A handle returned from #XMEMWFF3_open()
  *
- *  @param  timeout     Timeout (in milliseconds) to wait,
- *                      or #XMEM_LOCK_WAIT_FOREVER, #XMEM_LOCK_NO_WAIT
+ *  @param  timeout     Not used.
+ *
  *
  *  @retval  #XMEM_STATUS_SUCCESS         Success.
- *  @retval  #XMEM_STATUS_TIMEOUT         If @p timeout has expired.
+ *
+ *  @note   This API is blocking, and will block indefinitely until a shared
+ *          mutex is acquired.
  */
 int_fast16_t XMEMWFF3_lock(XMEM_Handle handle, uint32_t timeout);
 
 /*!
  *  @brief  Open an XMEM region for reading and writing.
  *
- *  @pre    #XMEMWFF3_init() was called.
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
+ *          #XMEMWFF3_init() must have been called first.
  *
  *  @param  params   Pointer to a parameter block.
  *                   Parameters muse be initialized before
  *                   calling #XMEMWFF3_open()
+ *
+ *  @note   This API is blocking, and will block indefinitely until a shared
+ *          mutex is acquired.
  *
  *  @return  A non-zero handle on success, else NULL.
  */
@@ -565,6 +612,9 @@ XMEM_Handle XMEMWFF3_open(XMEM_Params *params);
 
 /*!
  *  @brief   Read data from the XMEM region associated with the #XMEM_Handle.
+ *
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
  *
  *  @param   handle     A handle returned from #XMEMWFF3_open()
  *
@@ -575,20 +625,28 @@ XMEM_Handle XMEMWFF3_open(XMEM_Params *params);
  *                      that would exceed the current page will return an error.
  *
  *  @param   buffer     A buffer to copy the data to.
+ *                      For flash reads, the buffer may reside in internal RAM
+ *                      (TCM_DRAM or DRAM) or external PSRAM. Flash data is always
+ *                      read into an internal 256-byte intermediate buffer first,
+ *                      then copied to @p buffer in 256-byte chunks with alignment
+ *                      handling, so PSRAM destinations are supported.
  *
  *  @param   bufferSize The size of the buffer (number of bytes to read).
  *           If #XMEM_READ_STIG flash is on, and bufferSize is higher than 4 (one word),
  *           only the first 4 bytes will be read.
  *           If #XMEM_READ_STIG flash is on, bufferSize is not allowed to be lower than 4 (one word).
  *
- *  @param   flags      Write flags (#XMEM_READ_STIG)
+ *  @param   flags      Read flags (#XMEM_READ_STIG)
  *
  *  @retval  #XMEM_STATUS_SUCCESS     Success.
  *  @retval  #XMEM_STATUS_INV_OFFSET  If @p offset + @p size exceed the size
  *                                    of the region.
  *  @retval  #XMEM_STATUS_ERROR       If #XMEM_READ_STIG flash is on and bufferSize is lower than 4 (one word).
  *                                    If the internal read STIG operation is failed.
- *  @retval  #XMEM_STATUS_INVALID_PARAMS  If flags is not contain allowed bits.
+ *  @retval  #XMEM_STATUS_INVALID_PARAMS  If flags contain disallowed bits.
+ *
+ *  @note   This API is blocking, and will block indefinitely until a shared
+ *          mutex is acquired.
  */
 int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size_t bufferSize, uint_fast16_t flags);
 
@@ -598,6 +656,9 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
  *  This function allows XMEM write and erase operations to proceed after being
  *  temporarily inhibited by a call to #XMEMWFF3_lock().
  *
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
+ *
  *  @param  handle      A handle returned from #XMEMWFF3_open()
  */
 void XMEMWFF3_unlock(XMEM_Handle handle);
@@ -605,12 +666,8 @@ void XMEMWFF3_unlock(XMEM_Handle handle);
 /*!
  *  @brief   Write data to the XMEM region associated with the #XMEM_Handle.
  *
- *  @warning Writing to internal flash on most devices can introduce
- *  significant interrupt latencies while the write operation is in
- *  in progress. The user may want to surround certain real-time
- *  critical code sections with #XMEMWFF3_lock() and #XMEMWFF3_unlock() calls in order
- *  to prevent uncoordinated flash write operations from negatively
- *  impacting performance.
+ *  @pre    Calling context: Task only. This function can not be called from a
+ *          critical section - interrupts must be enabled.
  *
  *  @param   handle     A handle returned from #XMEMWFF3_open()
  *
@@ -620,8 +677,11 @@ void XMEMWFF3_unlock(XMEM_Handle handle);
  *                      must not cross page boundaries (256 bytes). Operations
  *                      that would exceed the current page will return an error.
  *
- *  @param   buffer     A buffer containing data to write to
- *                      the XMEM region.
+ *  @param   buffer     A buffer containing data to write to the XMEM region.
+ *                      The buffer may reside in internal RAM (TCM_DRAM or DRAM) or
+ *                      external PSRAM. For flash writes, data is always copied from
+ *                      @p buffer into an internal 256-byte intermediate buffer first,
+ *                      then written to flash, so PSRAM source buffers are supported.
  *
  *  @param   bufferSize The size of the buffer (number of bytes to write).
  *           If #XMEM_WRITE_STIG flash is on, and bufferSize is higher than 4 (one word),
@@ -649,17 +709,65 @@ void XMEMWFF3_unlock(XMEM_Handle handle);
  *                                      is requested but the verification buffer has not
  *                                      been configured.
  *
- *  @retval  #XMEM_STATUS_INVALID_PARAMS  If flags is not contain allowed bits.
+ *  @retval  #XMEM_STATUS_INVALID_PARAMS  If flags contain disallowed bits.
  *
- *  @remark  This call may lock a region to ensure atomic access to the region.
+ *  @note   This API is blocking, and will block indefinitely until a shared
+ *          mutex is acquired. This call may lock a region to ensure atomic access to the region.
+ *
+ *  @warning Writing to internal flash on most devices can introduce
+ *  significant interrupt latencies while the write operation is in
+ *  in progress. The user may want to surround certain real-time
+ *  critical code sections with #XMEMWFF3_lock() and #XMEMWFF3_unlock() calls in order
+ *  to prevent uncoordinated flash write operations from negatively
+ *  impacting performance.
  */
 int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, size_t bufferSize, uint_fast16_t flags);
 
-/*! @endcond */
+/*!
+ *  @brief  Determine the memory type of a given address.
+ *
+ *  This function maps an address to an #XMEM_MemType value by checking
+ *  whether the address falls within the external PSRAM, external flash,
+ *  or internal memory address ranges.
+ *
+ *  @param  addr  The address to classify.
+ *
+ *  @return  #XMEM_MEM_PSRAM    If @p addr is in the external PSRAM range.
+ *  @return  #XMEM_MEM_FLASH    If @p addr is in the external flash range.
+ *  @return  #XMEM_MEM_INTERNAL If @p addr is not in any external memory range.
+ */
+XMEM_MemType XMEMWFF3_addrToType(uintptr_t addr);
+
+/*!
+ *  @brief  Check whether an address resides in external memory.
+ *
+ *  This function returns @p true if @p addr maps to external PSRAM or
+ *  external flash, and @p false if it maps to internal memory.
+ *
+ *  @param  addr  The address to check.
+ *
+ *  @return  @p true   If @p addr is in external memory.
+ *  @return  @p false  If @p addr is in internal memory.
+ *
+ *  @sa  #XMEMWFF3_addrToType()
+ */
+bool XMEMWFF3_isAddrExternal(uintptr_t addr);
+
+/*!
+ *  @brief  Convert an address to a byte offset within its memory region.
+ *
+ *  Given an address, this function computes the byte offset from the base of
+ *  that region.
+ *
+ *  @param  addr  The address to convert.
+ *
+ *  @return  The byte offset of @p addr from the base of the specified
+ *           memory region.
+ */
+size_t XMEMWFF3_addrToOffset(uintptr_t addr);
 
 #if defined(__cplusplus)
 }
 #endif /* defined (__cplusplus) */
 
-/*@}*/
 #endif /* ti_drivers_xmem_XMEMWFF3__include */

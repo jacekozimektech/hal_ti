@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2024-2025 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -156,7 +156,7 @@ typedef enum
  *
  * @note Tested with flash only (did not test with PSRAM)
  */
-void FlashRead(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
+FlashUdmaJobStatus FlashRead(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
 
 /*!
  * @brief Read from external memory using STIG command.
@@ -166,7 +166,7 @@ void FlashRead(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
  *
  * @param[in] readFromAddr is a pointer to the external memory source data.
  * @param[in] writeToAddr is a pointer to the internal memory destination data.
- * @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM).
+ * @param[in] DeviceNum  Device identifier (XMEM_MEM_FLASH or XMEM_MEM_PSRAM).
  *
  * @return #FlashStigStatus of STIG execution command:
  * #FLASH_STIG_DONE    - STIG command done.
@@ -203,7 +203,7 @@ FlashStigStatus FlashExecuteReadSTIGCommand(uint32_t srcReadAddr, uint32_t *writ
  *
  * @note Tested with flash only (did not test with PSRAM)
  */
-void FlashWrite(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
+FlashUdmaJobStatus FlashWrite(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
 
 /*!
  * @brief Write to external memory using STIG command.
@@ -213,7 +213,7 @@ void FlashWrite(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length);
  *
  * @param[in] readFromAddr is a pointer to the internal memory source data.
  * @param[in] writeToAddr is a pointer to the external memory destination data.
- * @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM).
+ * @param[in] DeviceNum  Device identifier (XMEM_MEM_FLASH or XMEM_MEM_PSRAM).
  *
  * @return #FlashStigStatus of STIG execution command:
  * #FLASH_STIG_DONE    - STIG command done.
@@ -279,7 +279,7 @@ FlashStigStatus FlashExecuteEraseSTIGCommand(uint32_t EraseAddr_en, uint32_t src
  *
  * @param[in] eraseStartAddr from where to start the sector erase.
  *
- * @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM).
+ * @param[in] DeviceNum  Device identifier (XMEM_MEM_FLASH or XMEM_MEM_PSRAM).
  *
  * @return #FlashStigStatus of STIG execution command:
  * #FLASH_STIG_DONE    - STIG command done.

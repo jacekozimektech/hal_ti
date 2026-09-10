@@ -43,6 +43,7 @@
  * stand-alone definitions. Included file holds shared definitions.
  */
 #include <cc3xxx_public_types.h>
+#include "wlan_if.h"
 
 #include "osi_type.h"
 //#include "cc3xxx_public_commands.h"
@@ -694,11 +695,6 @@ typedef struct
 #define NUM_OF_CHANNELS_24              14
 #define A_BAND_CHANNEL_COUNT            26
 #define TWD_CALIBRATION_CHANNEL_2_4_MIN 1
-#define MAX_TX_POWER                    210     // 21 dBm
-#define MIN_TX_POWER                    -100    // -10 dBm
-#define DEF_TX_POWER                    210
-#define DBM_TO_TX_POWER_FACTOR          10
-
 
 #define GET_BAND_BY_CHANNEL(chan)      ( ((unsigned char)(chan) <= NUM_OF_CHANNELS_24) ? RADIO_BAND_2_4GHZ : RADIO_BAND_5GHZ )
 

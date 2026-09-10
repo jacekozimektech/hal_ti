@@ -3,7 +3,7 @@
  *
  *  Description:    Defines and prototypes for the XIP peripheral.
  *
- *  Copyright (c) 2024 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __XIP_H__
-#define __XIP_H__
+#ifndef ti_devices_xip__include
+#define ti_devices_xip__include
 
 //*****************************************************************************
 //
@@ -227,4 +227,4 @@ void XIPEnableOTFDE(void);
 //
 //*****************************************************************************
 
-#endif // __XIP_H__
+#endif // ti_devices_xip__include

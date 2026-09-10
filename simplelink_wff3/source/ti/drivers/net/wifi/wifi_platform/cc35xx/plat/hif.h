@@ -74,6 +74,10 @@ extern "C" {
 #define HIF_ERR_BUFFER_OVERFLOW  (-4) //!< Error code for length which is less than required
 #define HIF_ERR_INVALID_SRC_ADDR (-5) //!< Error code for unsupported source address (read operation)
 #define HIF_ERR_WRITE_FAIL       (-6) //!< Error code for failure of direct write operation
+#define HIF_ERR_PSRAM_READ_FAIL  (-7) //!< Error code for failure to copy data from PSRAM using XMEM
+#define HIF_ERR_BUFFER_TOO_LARGE (-8) //!< Error code for transfer size exceeding staging buffer
+#define HIF_ERR_INIT_FAIL        (-9) //!< Error code for initialization failure
+#define HIF_ERR_PSRAM_WRITE_FAIL (-10) //!< Error code for failure to copy data to PSRAM using XMEM
 
 //*****************************************************************************
 //
@@ -119,6 +123,7 @@ extern "C" {
 //! \param dmaChannel the DMA channel that will be used, can be 1 to 11.
 //! \return
 //! - \ref HIF_STATUS_SUCCESS
+//! - \ref HIF_ERR_INIT_FAIL
 //
 //*****************************************************************************
 extern int32_t HIFInit(uint32_t dmaChannel);
@@ -144,14 +149,20 @@ extern int32_t HIFDeinit(void);
 //! The function first sets write mode to start read operation from the NAB
 //! and then starts the read operation.
 //!
+//! **PSRAM Support**: If destStartAddr is in PSRAM range (0x60000000-0x60800000),
+//! the function automatically uses a 2-stage transfer:
+//!   1. HIF->RAM via SYSDMA
+//!   2. RAM->PSRAM via XMEM/UDMA
+//!
 //! \param dmaChannel the DMA channel that will be used, can be 1 to 11.
 //! \param srcAddr the address of the NAB to read from.
 //! - \ref HIF_NAB_DATA_ADDR
 //! - \ref HIF_NAB_CONTROL_ADDR
 //!
-//! \param destStartAddr is the destination address of the read.
+//! \param destStartAddr is the destination address of the read (supports both RAM and PSRAM).
 //! \param length is size of the data to read in bytes. Must be a multiple of 4,
 //!         and greater than 16 bytes (if srcAddr == HIF_NAB_DATA_ADDR).
+//!         Maximum 2048 bytes for PSRAM destinations.
 //! \param actualLengthRead pointer to the actual length that was read, received by reading the NAB header.
 //! \return
 //! - \ref HIF_STATUS_SUCCESS
@@ -159,6 +170,8 @@ extern int32_t HIFDeinit(void);
 //! - \ref HIF_ERR_WRITE_FAIL
 //! - \ref HIF_ERR_BUFFER_OVERFLOW
 //! - \ref HIF_ERR_INVALID_SRC_ADDR
+//! - \ref HIF_ERR_PSRAM_WRITE_FAIL
+//! - \ref HIF_ERR_BUFFER_TOO_LARGE
 //!
 //
 //*****************************************************************************
@@ -174,21 +187,29 @@ extern int32_t HIFRead(uint32_t dmaChannel,
 //!
 //! This function must be called after \ref HIFInit().
 //!
+//! **PSRAM Support**: If srcAddr is in PSRAM range (0x60000000-0x60800000),
+//! the function automatically uses a 2-stage transfer:
+//!   1. PSRAM->RAM via XMEM/UDMA
+//!   2. RAM->HIF via SYSDMA
+//!
 //! \param dmaChannel the DMA channel that will be used, can be 1 to 11.
-//! \param srcAddr is the address to write from.
-//! \param length is size of the data to write in bytes.should be multiple of 4
+//! \param srcAddr is the address to write from (supports both RAM and PSRAM).
+//! \param length is size of the data to write in bytes. Must be multiple of 4.
+//!        Maximum 2048 bytes for PSRAM sources.
 //
 //! \return
 //! - \ref HIF_STATUS_SUCCESS
 //! - \ref HIF_ERR_NOT_ALIGN
 //! - \ref HIF_ERR_DMA_WRITE_FAIL
+//! - \ref HIF_ERR_PSRAM_READ_FAIL
+//! - \ref HIF_ERR_BUFFER_TOO_LARGE
 //
 //*****************************************************************************
 extern int32_t HIFWrite(uint32_t dmaChannel, uint8_t *srcAddr, uint16_t length);
 
 //*****************************************************************************
 //
-//! \brief Wait for fifo to be empty and Switch HIF to idle mode 0 
+//! \brief Wait for fifo to be empty and Switch HIF to idle mode 0
 //!
 //!
 //!

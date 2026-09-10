@@ -138,9 +138,9 @@ ti_driver_ifData_t *gpDriverIfDataDev  = NULL; //TIWLAN_DEV_NAME_P2PDEV
 off_channel_t g_offChannelDev = {0};
 void* g_remain_on_channel_apPriv = NULL;
 
-p2pGroupRoleType_e gP2pGroupRoleType = NOT_IN_GROUP; // used only for p2p events
+p2pGroupRoleType_e gP2pGroupRoleType = NOT_IN_GROUP; // used when p2p group is formed
 
-p2pGroupRole_e gP2pGroupRole = P2P_GROUP_ROLE_NONE;
+p2pGroupRole_e gP2pGroupRole = P2P_GROUP_ROLE_NONE; // used when p2p negotiation completes and the future role is defined, but not yet connected to the group
 
 const uint8_t gTIHwConfigChannelsBG[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
 const uint8_t gTIHwConfigChannelsA[] = PERIODIC_SCAN_CHANNELS_ARRAY_A_BAND;
@@ -170,11 +170,15 @@ extern uint32_t isextDPP();
 extern int32_t set_cond_in_process_wlan_supplicant_operation();
 extern int32_t set_cond_in_process_wlan_one_shot_scan();
 extern int32_t set_cond_in_process_wlan_periodic_scan();
+#ifndef TI_STA_ONLY_BUILD
 extern int32_t set_cond_in_process_wlan_ap_roledown();
+#endif
 extern int32_t set_cond_in_process_wlan_sta_roledown();
 extern void set_finish_wlan_one_shot_scan();
 extern void set_finish_wlan_periodic_scan();
+#ifndef TI_STA_ONLY_BUILD
 extern void set_finish_wlan_ap_roledown();
+#endif
 extern void set_finish_wlan_sta_roledown();
 extern void set_finish_wlan_supplicant_operation();
 extern void CME_start_one_shot_scan_timer();
@@ -189,7 +193,6 @@ uint32_t gBtmCtr = 0;
 
 extern OsiSyncObj_t gCmeEapolsStaSyncObject;
 
-extern void CmeStaP2pClientInit(Cme_Users_e __user);
 extern void trnspt_cmd_get_mac_addr(uint8 *macAddr, RoleType_e aRoleType);
 
 // ============================================================================
@@ -331,14 +334,15 @@ void *ti_driver_if_init(void *ctx, const char *ifname, void *global_priv)
     else if(0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_GO)))
     {
         gpDriverIfDataAp = pDrv; 
+        gP2pGroupRole = P2P_GROUP_ROLE_GO;
     }
     else if(0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_CL)))
     {
-        gpDriverIfDataSta = pDrv; 
+        gpDriverIfDataSta = pDrv;
+        gP2pGroupRole = P2P_GROUP_ROLE_CLIENT;
     }
     else if(0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P))) //group
     {
-        //gpDriverIfDataSta2 = pDrv; 
         if (gP2pGroupRole == P2P_GROUP_ROLE_CLIENT)
         {
             gpDriverIfDataSta = pDrv; //saved just for l2_packet interface implementation
@@ -349,8 +353,8 @@ void *ti_driver_if_init(void *ctx, const char *ifname, void *global_priv)
         }
         else
         {
-            //todo - there also can be to cases - 1. p2p cl joining to Ago and p2p aGO
-            gpDriverIfDataSta = pDrv;
+            CME_PRINT_REPORT_ERROR("\n\r probably should not get here.... gP2pGroupRole=%d", gP2pGroupRole);
+            ASSERT_GENERAL(0);
         }
     }
     else
@@ -404,12 +408,20 @@ void *ti_driver_if_init(void *ctx, const char *ifname, void *global_priv)
         // Reset RSN DB
         rsn_init();
         scan_result_table_init();
-        pDrv->apPowerLevel = DBM_DIV_10_2_DBM(MAX_TX_POWER);
+        pDrv->apPowerLevel = WLAN_MAX_TX_POWER_DBM;
 
         pDrv->security_key_idx_mc1 = 0xFF;
         pDrv->security_key_idx_mc2 = 0xFF;
         pDrv->broadcastNextKeyArrEntry = 0;
     }
+
+#ifndef TI_STA_ONLY_BUILD
+    if (pDrv && ROLE_IS_TYPE_AP(pDrv->roleType))
+    {
+        pDrv->configuredApTxPower = CmeGetConfiguredApTxPower();
+        GTRACE(GRP_DRIVER_CC33, "Stored configured AP TX power: %d dBm in driver structure", pDrv->configuredApTxPower);
+    }
+#endif
 
     if (pDrv && ROLE_IS_TYPE_P2P(pDrv->roleType))
     {
@@ -417,9 +429,7 @@ void *ti_driver_if_init(void *ctx, const char *ifname, void *global_priv)
         CME_PRINT_REPORT("\r\nThe P2P Role interface is initialized: %d", pDrv->roleType);
         if (ROLE_IS_TYPE_P2P_CLIENT(pDrv->roleType))
         {
-            // Supplicant is the one that initializes p2p client role
-            // we need to move the STA SM Flow to activated state
-            CmeStaP2pClientInit(CME_STA_NONE_USER);
+            CmeStationFlowSM(CME_STA_P2P_CLIENT_INIT_EVENT, CME_P2P_CLIENT_USER);
         }
     }
     //p2p device just initialized -  yet no role group
@@ -428,7 +438,7 @@ void *ti_driver_if_init(void *ctx, const char *ifname, void *global_priv)
         gP2pGroupRole = P2P_GROUP_ROLE_NONE;
     }
 
-    pDrv->fwMaxTxPower = DBM_DIV_10_2_DBM(MAX_TX_POWER);
+    pDrv->fwMaxTxPower = WLAN_MAX_TX_POWER_DBM;
 
     if(g_offChannelDev.p_remain_channel_mutex == NULL)
     {
@@ -513,8 +523,7 @@ void ti_driver_deinit(void *apPriv)
         // move STA SM Flow to deactivated state
         if (ROLE_IS_TYPE_P2P_CLIENT(pDrv->roleType))
         {
-            CME_PRINT_REPORT("\r\nin deinit[P2P] Set CmeStationFlowSM to CME_STA_DISABLED_STATE ***");
-            CmeStaP2pClientDeinit(CME_STA_NONE_USER);
+            CmeStationFlowSM(CME_STA_P2P_CLIENT_DEINIT_EVENT, CME_P2P_CLIENT_USER);
             gP2pGroupRoleType = NOT_IN_GROUP;
         }
         // Verify the dynamically allocated members were released; if not, this
@@ -566,8 +575,10 @@ void ti_driver_deinit(void *apPriv)
         }
 
         //if aging timer and thread are up release them
+#ifndef TI_STA_ONLY_BUILD
         CME_peer_aging_timer_stop(&pDrv->timerPeerAgingSample);
         pDrv->peerAgingTimeout = 0;
+#endif
 
         os_free(pDrv);
         gpDriverIfDataAp = NULL;
@@ -973,7 +984,8 @@ static int32_t buildApChannelsCapability(RoleType_e roleType,
 {
     uint8_t *pChanList = NULL;
     uint32_t freqBase = 0;
-    uint8_t chanListLen = 0, maxTxPower = 0, j = 0;
+    uint8_t chanListLen = 0, j = 0;
+    int8_t  maxTxPower = 0;
     uint8_t numSupported = 0, i = 0;
     channelCapability_t channelCapability = {0};
     int32_t ret = 0;
@@ -1062,7 +1074,12 @@ static int32_t buildApChannelsCapability(RoleType_e roleType,
         ret = regulatoryDomain_getChMaxPower(hwMode->channels[j].chan, &maxTxPower);
         if (ret)
         {
-            hwMode->channels[j].max_tx_power = maxTxPower;
+            if (maxTxPower < 0)
+            {
+                GTRACE(GRP_GENERAL_ERROR, "channel %d: negative max_tx_power %d dBm, clamping to 0",
+                       hwMode->channels[j].chan, maxTxPower);
+            }
+            hwMode->channels[j].max_tx_power = (u8)MAX((int8_t)0, maxTxPower);
         }
 
         /* Channel 14 frequency breaks frequency offset calculation */
@@ -1194,17 +1211,20 @@ static int32_t getHwNumModes(uint16_t *numModes,
                              uint8_t *is5GHzBandSupported)
 {
     uint8_t phyConfig = l2_GetPhyConfig();
+    Bool_e regDomain_5GHzSupport;
 
     ASSERT_GENERAL(phyConfig <= 2);
 
     *numModes = 0;
 
     *is2_4GHzBandSupported = regulatoryDomain_isBandSupported(RADIO_BAND_2_4GHZ);
-    *is5GHzBandSupported = regulatoryDomain_isBandSupported(RADIO_BAND_5GHZ);
+
+    regDomain_5GHzSupport = regulatoryDomain_isBandSupported(RADIO_BAND_5GHZ);
+    *is5GHzBandSupported = (regDomain_5GHzSupport && l2_cfg_is5GhzSupported());
 
     if (phyConfig == L2_CFG_BAND_ONLY_2_4GHZ)
     {
-        if (!(*is2_4GHzBandSupported))
+        if (*is2_4GHzBandSupported == FALSE)
         {
             return -1;
         }
@@ -1212,7 +1232,7 @@ static int32_t getHwNumModes(uint16_t *numModes,
     }
     else if (phyConfig == L2_CFG_BAND_ONLY_5GHZ)
     {
-        if (!(*is5GHzBandSupported))
+        if (*is5GHzBandSupported == FALSE)
         {
             return -1;
         }
@@ -1222,7 +1242,7 @@ static int32_t getHwNumModes(uint16_t *numModes,
     {
         // It might happen that phyCfg and regulatory domain rules
         // aren't aligned. In this case we try to adjust the
-        // phy configuration with the regulatory domain
+        // phy configuration to the regulatory domain
         if ((*is2_4GHzBandSupported))
         {
             *numModes += 1;
@@ -1817,7 +1837,14 @@ int ti_driver_send_l2_data(ti_driver_ifData_t *pDrv,
     else
     {
         GTRACE(GRP_DRIVER_CC33, "Ether type is Data type 0x%x \n\r", proto);
-        TX_DATA_SEND_PRINT("\n\rsend Ether Data 0x%x", proto);
+        TX_DATA_SEND_PRINT("\n\rsend Ether Data 0x%x datalen %d", proto, dataLen);
+
+        if (((proto != FRAME_TYPE_NO_DATA_FRAME) && (proto != FRAME_TYPE_QOS_NO_DATA_FRAME)) && dataLen == 0)
+        {
+            TX_DATA_SEND_PRINT_ERROR("\n\r Error: Data frame with no data (datalen 0)");
+            status = -1;
+            goto fail;
+        }
 
         pEthHead  = os_malloc(sizeof(TEthernetHeader));
         if (!pEthHead)
@@ -1831,7 +1858,8 @@ int ti_driver_send_l2_data(ti_driver_ifData_t *pDrv,
         pEthHead->type = BYTE_SWAP_WORD(proto);
 
         total_len = sizeof(NAB_tx_header_t)+ sizeof(TxIfDescriptor_t) + ETHERNET_HDR_LEN + dataLen;
-        /* allocate mgmt packet descriptor and buffers */
+
+        /* allocate data packet descriptor and buffers */
         pPktCtrlBlk = udata_AllocTxDataPacket(dataLen,ETHERNET_HDR_LEN,pEthHead);
 
         if (!pPktCtrlBlk)
@@ -2304,11 +2332,13 @@ int Wlan_RoleDown_from_CME_thread(WlanRole_e roleType, unsigned long int timeout
 
     HOOK(HOOK_WLAN_IF);
 
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         ret = set_cond_in_process_wlan_ap_roledown();
     }
     else
+#endif
     {
         ret = set_cond_in_process_wlan_sta_roledown();
     }
@@ -2366,22 +2396,26 @@ int Wlan_RoleDown_from_CME_thread(WlanRole_e roleType, unsigned long int timeout
         }
     }
     HOOK(HOOK_WLAN_IF);
+#ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
     {
         set_finish_wlan_ap_roledown();
     }
     else
+#endif
     {
         set_finish_wlan_sta_roledown();
     }
     return ret;
 
     fail:
+#ifndef TI_STA_ONLY_BUILD
         if(roleType == WLAN_ROLE_AP)
         {
             set_finish_wlan_ap_roledown();
         }
         else
+#endif
         {
             set_finish_wlan_sta_roledown();
         }
@@ -3093,6 +3127,7 @@ int ti_driver_if_add(void *apPriv, enum wpa_driver_if_type type,
                     const char *bridge, int use_existing, int setup_ap)
 {
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)apPriv;
+    uint8_t pAddress[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     CME_PRINT_REPORT("\n\rti_driver: Add new interface: type = %d, ifname=%s, force_ifname: %s, drvRoleid=%d",
                 type, ifname, force_ifname, pDrv->roleId);
     switch(type)
@@ -3101,13 +3136,26 @@ int ti_driver_if_add(void *apPriv, enum wpa_driver_if_type type,
         case WPA_IF_AP_VLAN:
             os_strlcpy(force_ifname, NETIF_NAME(TIWLAN_DEV_NAME_SAP), IFNAMSIZ);
             break;
-        case WPA_IF_P2P_CLIENT:
+
         case WPA_IF_P2P_GO:
+        {
+            /* p2p Autonomous GO will take AP MAC Address */
+            trnspt_cmd_get_mac_addr(pAddress, ROLE_AP);
+            IRQ_UtilCopyMacAddress(pAddress, if_addr);
+            os_strlcpy(force_ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_GO), IFNAMSIZ);
+        }
+        break;
+        case WPA_IF_P2P_CLIENT:
+        {
+            trnspt_cmd_get_mac_addr(pAddress, ROLE_AP);
+            IRQ_UtilCopyMacAddress(pAddress, if_addr);
+            os_strlcpy(force_ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_CL), IFNAMSIZ);
+        }
+        break;
         case WPA_IF_P2P_GROUP:
         {
             /* we need the p2p-group interface up to get its mac addr */
-            uint8_t pAddress[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
-            trnspt_cmd_get_mac_addr(pAddress, ROLE_STA);
+            trnspt_cmd_get_mac_addr(pAddress, ROLE_AP);
             IRQ_UtilCopyMacAddress(pAddress, if_addr);
             os_strlcpy(force_ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P), IFNAMSIZ);
         }
@@ -3233,13 +3281,14 @@ int ti_send_mgmt_frame(void *apPriv,
     }
      //CME_PRINT_REPORT("\n\rti_driver:  roleType:%d hlid:%d  NetifId:%d\n\r", pDrv->roleType,link,uNetIfId);
 
-    if((pTxCtrl->aEncryptMgmt[link]) &&
-        (stype != WLAN_FC_STYPE_ASSOC_RESP) &&
-        (stype != WLAN_FC_STYPE_REASSOC_RESP) &&
-        !(stype == WLAN_FC_STYPE_ACTION &&
-            pPayload->u.action.category == WLAN_ACTION_PUBLIC))
+    if( (pTxCtrl->aEncryptMgmt[link]) &&
+        ((stype == WLAN_FC_STYPE_DISASSOC) ||
+         (stype == WLAN_FC_STYPE_DEAUTH) ||
+         ((stype == WLAN_FC_STYPE_ACTION || stype == WLAN_FC_STYPE_ACTION_NO_ACK) &&
+          pPayload->u.action.category != WLAN_ACTION_PUBLIC)) )
     {
         SecureHdrLength = RSN_SEC_LEN;
+        CME_PRINT_REPORT_ERROR("\n\rti_send_mgmt_frame stype %d encrypted for link %d", stype, link);
     }
 
     extraHThdr += SecureHdrLength;
@@ -4231,6 +4280,7 @@ static void sendEventUnprotDeauthDisassoc(ti_driver_ifData_t *apDrv, uint32_t aT
     HOOK(HOOK_IN_DRIVER_TI_WIFI);
 }
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  rx_send_ap_p2p_action_to_ext_app
     Send P2P action frame  event to the application
@@ -4322,6 +4372,7 @@ int32 rx_send_ap_p2p_action_to_ext_app(RxIfDescriptor_t *desc,
 
     return 0;
 }
+#endif
 /* ----------------------------------------------------------------------------
  rx_send_device_dpp_action_to_ext_app
     Send P2P action frame  event to the application
@@ -4644,10 +4695,12 @@ void drv_handleRxMngPacket(void *descriptor)
                                 switch ((uint8_t)pMngPack->u.action.u.public_action.variable[4] ) {
                                     case P2P_PROV_DISC_REQ:
                                     {
+#ifndef TI_STA_ONLY_BUILD
                                         if(rx_send_ap_p2p_action_to_ext_app(desc, pDrv, pMngPack, packLen) == 0)
                                         {
                                             notifySupp = FALSE;//frame was send to external app
                                         }
+#endif
                                     }
                                     break;
                                 }
@@ -5753,6 +5806,7 @@ void drv_handleGroupRole(struct wpa_supplicant *wpa_s, Bool_e isGroupRoleGo)
 //   Notifications from supplicant
 //============================================================================
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_p2p_dev_found
 
@@ -5792,13 +5846,27 @@ void ti_driver_p2p_dev_found(struct wpa_supplicant *wpa_s, const uint8_t *peer_a
         //we change interface type of device's parent
         if (pDrv->p2pCapabGroupOwnerBit == 1)
         {
+            if (cme_is_sta_role_like_activated())
+            {
+                // Joining an existing GO would make us P2P Client.
+                // STA + P2P Client is not a supported concurrent combination.
+                // Stop the find immediately and notify the app - no need to wait for find timeout.
+                GTRACE(GRP_DRIVER_CC33, "ti_driver: peer is existing GO but STA is active - aborting connect");
+                CME_PRINT_REPORT_ERROR("\r\nti_driver: P2P client join rejected: STA role is active");
+                cmeStopP2pFind(wpa_s);
+                cmeP2pClearAll();
+                wlanDispatcherSendEvent(WLAN_EVENT_P2P_GROUP_FORMATION_FAILED, NULL, 0);
+                return;
+            }
             drv_handleGroupRole(wpa_s, FALSE);
         }
         //Send message to CME that a desired peer found - to trigger connect command
         CME_P2pDevFound(pDrv->roleId);
     }
 }
+#endif // TI_STA_ONLY_BUILD
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_go_neg_completed
 
@@ -5808,7 +5876,7 @@ void ti_driver_p2p_dev_found(struct wpa_supplicant *wpa_s, const uint8_t *peer_a
  Return code:   none
 ---------------------------------------------------------------------------- */
 void ti_driver_go_neg_completed(struct wpa_supplicant *wpa_s,
-                                struct p2p_go_neg_results *res)                          
+                                struct p2p_go_neg_results *res)
 {
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
     uint32_t roleId;
@@ -5819,9 +5887,10 @@ void ti_driver_go_neg_completed(struct wpa_supplicant *wpa_s,
 
     if (res->status != 0)
     {
-        GTRACE(GRP_DRIVER_CC33, "Negotiation Failed!");
+        GTRACE(GRP_DRIVER_CC33, "Negotiation Failed! status=%d", res->status);
+        CME_PRINT_REPORT_ERROR("\r\nti_driver_go_neg_completed: GO negotiation failed, status=%d", res->status);
         cmeP2pClearAll();
-
+        wlanDispatcherSendEvent(WLAN_EVENT_P2P_GROUP_FORMATION_FAILED, NULL, 0);
         return;
     }
     //Negotiation was successful 
@@ -5836,7 +5905,9 @@ void ti_driver_go_neg_completed(struct wpa_supplicant *wpa_s,
 
     drv_handleGroupRole(wpa_s, res->role_go);
 }
+#endif
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_p2p_find_stopped
 
@@ -5869,6 +5940,8 @@ void ti_driver_p2p_find_stopped(struct wpa_supplicant *wpa_s)
     }
 
 }
+#endif
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_p2p_group_formation_failure
 
@@ -5883,9 +5956,9 @@ void ti_driver_p2p_group_formation_failure(struct wpa_supplicant *wpa_s)
 
     //clean bit. connection stopped with failure
     CME_PRINT_REPORT("\n\r ti_driver : P2P Group Formation FAILED roleid=%d, roleType = %d, if_name = %s",
-        pDrv->roleId, pDrv->roleType, wpa_s->ifname);  
+        pDrv->roleId, pDrv->roleType, wpa_s->ifname);
     GTRACE(GRP_DRIVER_CC33, "ti_driver: P2P Group Formation FAILED roleid=%d, roleType = %d, if_name = %s",
-        pDrv->roleId, pDrv->roleType, wpa_s->ifname);  
+        pDrv->roleId, pDrv->roleType, wpa_s->ifname);
 
     // need to stop all running p2p related processes
     // in case when P2P CL role is up and scanning - stop scan
@@ -5896,7 +5969,9 @@ void ti_driver_p2p_group_formation_failure(struct wpa_supplicant *wpa_s)
     //event to app that group formation failed
     wlanDispatcherSendEvent(WLAN_EVENT_P2P_GROUP_FORMATION_FAILED, NULL, 0);
 }
+#endif // TI_STA_ONLY_BUILD
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_p2p_group_started
 
@@ -5946,7 +6021,9 @@ void ti_driver_p2p_group_started(struct wpa_supplicant *wpa_s, struct wpa_ssid *
         
     }
 }
+#endif
 
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  ti_driver_p2p_group_removed
 
@@ -5959,36 +6036,24 @@ void ti_driver_p2p_group_removed(struct wpa_supplicant *wpa_s)
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
     RoleType_e roleType = pDrv->roleType;
 
-    CME_PRINT_REPORT("\n\r P2P Group REMOVED roleType:%d",roleType);
+    CME_PRINT_REPORT("\n\r P2P Group REMOVED roleType:%d gP2pGroupRoleType=%d gP2pGroupRole=%d",roleType, gP2pGroupRoleType, gP2pGroupRole);
     GTRACE(GRP_DRIVER_CC33, "ti_driver: P2P Group REMOVED roleid=%d roleType=%d, wpa_s=%p",
             pDrv->roleId, roleType, wpa_s);
 
-    if (ROLE_IS_TYPE_P2P(roleType))
-    {
-        struct wpa_supplicant *wpa_s;
+    gP2pGroupRoleType = NOT_IN_GROUP;
+    gP2pGroupRole = P2P_GROUP_ROLE_NONE;
 
-        gP2pGroupRoleType = NOT_IN_GROUP;
-        gP2pGroupRole = P2P_GROUP_ROLE_NONE;
+    //init p2p module globals
+    gCmeP2pInfo.p2pFindStopping = FALSE;
+    gCmeP2pInfo.p2pConnectPending = FALSE;
 
-        //init p2p module globals
-        gCmeP2pInfo.p2pFindStopping = FALSE;
-        gCmeP2pInfo.p2pConnectPending = FALSE;
-
-        // release connection related flags on device role
-        wpa_s = drv_getP2pDeviceSupplicant();
-        if (wpa_s == NULL)
-        {
-            CME_PRINT_REPORT_ERROR("\n\r Could not retrive p2p device drv! ");
-        }
-        else
-        {
-            cmeP2pClearAll();
-        }
+    // release connection related flags on device role
+    cmeP2pClearAll();
         
-        //notify host that group was removed 
-        CmeP2pGroupRemovedNotify(roleType);
-    }
+    //notify host that group was removed
+    CmeP2pGroupRemovedNotify(roleType);
 }
+#endif
 
 //-----------------------------------------------------------------------------------------//
 

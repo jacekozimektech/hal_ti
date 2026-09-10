@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,6 +47,15 @@
  * the application and only noted to ensure sensible access timeouts are set.
  * The GHASH computation for GCM has optimizations using Shoup's 4-bit tables that
  * are precomputed for each hash key H.
+ *
+ *  # CC35XX: External Memory (PSRAM) Support
+ *  On CC35XX devices, AES-GCM input, output, and AAD buffers may reside in
+ *  PSRAM. The driver object itself may also be placed in PSRAM. Bounce buffers
+ *  must be configured via SysConfig (HSM module) large enough to hold the
+ *  largest single-pass transfer. See #HSMXXF3_BounceBuffers.
+ *
+ *  Callback return behavior (#AESGCM_RETURN_BEHAVIOR_CALLBACK) is not
+ *  supported on CC35XX regardless of buffer location.
  *
  *  # Implementation Limitations
  *  - Only plaintext CryptoKeys are supported by this implementation.

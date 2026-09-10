@@ -114,6 +114,9 @@ ti_driver_ifData_t * drv_getDriverData(const char *ifname)
 
     if (0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_GO)))
         return (gpDriverIfDataAp);
+
+    if (0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P_CL)))
+        return (gpDriverIfDataSta);
         
     if (0 == os_strcmp(ifname, NETIF_NAME(TIWLAN_DEV_NAME_P2P)))
     {

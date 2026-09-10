@@ -3,7 +3,7 @@
  *
  *  Description:    Prototypes and defines for the I2C API.
  *
- *  Copyright (c) 2023-2024 Texas Instruments Incorporated
+ *  Copyright (c) 2023-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __I2C_H__
-#define __I2C_H__
+#ifndef ti_devices_i2c__include
+#define ti_devices_i2c__include
 
 //*****************************************************************************
 //
@@ -1223,4 +1223,4 @@ __STATIC_INLINE uint32_t I2CIntStatus(uint32_t base, bool masked)
 //
 //*****************************************************************************
 
-#endif // __I2C_H__
+#endif // ti_devices_i2c__include

@@ -338,7 +338,14 @@ struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp)
         cfgBuildWpsParameters(config);
 
     }
-     //P2P GO configuration
+	else if (0 == strcmp (name, NETIF_CONF_NAME(TIWLAN_DEV_NAME_P2P_CL)))
+	{
+        //Device specific configuration
+        cfgBuildP2pParameters(config);
+        
+        //Set device WPS related params
+        cfgBuildWpsParameters(config);
+	}
 	else if (0 == strcmp (name, NETIF_CONF_NAME(TIWLAN_DEV_NAME_P2P_GO)))
 	{
 	    // Enable WMM

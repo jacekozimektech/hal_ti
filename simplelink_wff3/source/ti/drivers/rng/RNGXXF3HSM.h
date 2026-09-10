@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2026, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,6 +49,12 @@
  *
  *  @warning For this implementation for CC27XX, the maximum number of bits that
  *           may be requested in a single call is 524287 bits (512 Kib - 1b)
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #RNG_RETURN_BEHAVIOR_CALLBACK is not supported when the
+ *  output buffer is in PSRAM. Returns #RNG_STATUS_UNSUPPORTED in that case.
+ *  Use #RNG_RETURN_BEHAVIOR_BLOCKING or #RNG_RETURN_BEHAVIOR_POLLING instead.
+ *  See #HSMXXF3_BounceBuffers.
  */
 
 #ifndef ti_drivers_rng_RNGXXF3HSM__include
@@ -71,6 +77,13 @@ extern "C" {
  *  User needs to either use CryptoKey_BLANK_PLAINTEXT_HSM or CryptoKey_BLANK_PLAINTEXT
  */
 #define RNG_STATUS_INVALID_KEY_ENCODING ((int_fast16_t)(RNG_STATUS_RESERVED - 0))
+
+/*!
+ * @brief   The requested operation or configuration is not supported.
+ *
+ *  See the CC35XX section in #RNGXXF3HSM.h for conditions and alternatives.
+ */
+#define RNG_STATUS_UNSUPPORTED ((int_fast16_t)(RNG_STATUS_RESERVED - 1))
 
 /*!
  *  @brief RNGXXF3HSM Object

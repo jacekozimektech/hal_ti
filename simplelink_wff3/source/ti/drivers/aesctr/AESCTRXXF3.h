@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2026, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -48,6 +48,18 @@
  *  # Implementation Limitations
  *  - Only plaintext CryptoKeys are supported by this implementation.
  *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #AESCTR_RETURN_BEHAVIOR_CALLBACK is not supported when
+ *  the output buffer is in PSRAM, or if the input buffer is in PSRAM and the data length exceeds the
+ *  HSM bounce buffer chunk size (min of input/output bounce buffer sizes, rounded
+ *  down to an AES block boundary). This applies to one-step operations
+ *  (#AESCTR_oneStepEncrypt / #AESCTR_oneStepDecrypt) as well as segmented
+ *  operations (#AESCTR_addData / #AESCTR_finalize).
+ *
+ *  Returns #AESCTR_STATUS_FEATURE_NOT_SUPPORTED in that case.
+ *  Use #AESCTR_RETURN_BEHAVIOR_BLOCKING or #AESCTR_RETURN_BEHAVIOR_POLLING
+ *  instead. See #HSMXXF3_BounceBuffers.
+ *
  *  # Runtime Parameter Validation #
  *  The driver implementation does not perform runtime checks for most input parameters.
  *  Only values that are likely to have a stochastic element to them are checked (such
@@ -84,7 +96,8 @@ extern "C" {
  *  Counter endianness as Big Endian
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCTRXXF3_DEFAULT_AUTOCFG                                                \
         ((uint32_t)AES_AUTOCFG_AESSRC_BUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3S |    \
          (uint32_t)AES_AUTOCFG_TRGAES_RDTXT3 | (uint32_t)AES_AUTOCFG_CTRSIZE_CTR128 | \
@@ -107,7 +120,8 @@ extern "C" {
  *  Counter endianness as Big Endian
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCTRXXF3_LAST_BLOCK_AUTOCFG                                                 \
         ((uint32_t)AES_AUTOCFG_AESSRC_BUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3S |        \
          (uint32_t)AES_AUTOCFG_CTRSIZE_CTR128 | (uint32_t)AES_AUTOCFG_CTRENDN_BIGENDIAN | \
@@ -144,7 +158,8 @@ typedef struct
     AESCTR_CallbackFxn callbackFxn;
     AESCTR_OperationType operationType;
     bool threadSafe;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     /*!
      * @brief The status of the HSM Boot up process
      * if HSMXXF3_STATUS_SUCCESS, the HSM booted properly.

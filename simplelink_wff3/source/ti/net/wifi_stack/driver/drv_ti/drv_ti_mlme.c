@@ -97,7 +97,7 @@
 #define MAX_AUTH_MSG_LEN        (MAX_EXTRA_IES_LEN + AUTH_MSG_HEADER_LEN)
 
 
-#define TX_COMPLETE_TIMEOUT     (200)
+#define TX_COMPLETE_TIMEOUT     (1000)
 
 
 // ============================================================================
@@ -109,6 +109,7 @@
 // ============================================================================
 // sync object deauth flow
 extern OsiSyncObj_t gtxCompleteSyncObj;
+extern volatile uint8_t gFwCrashOccurred;
 
 // ============================================================================
 //      External Functions
@@ -601,20 +602,20 @@ int32_t ti_drv_txAssocReqPacket(ti_driver_ifData_t *apDrv,
     {
         powerCapability_t powerCapability;
         dot11_CAPABILITY_t *pDot11PowerCapability = (dot11_CAPABILITY_t *)pPack;
-        uint8_t maxTxPower;
+        int8_t maxTxPower;
 
         regulatoryDomain_GetPowerCapability(&powerCapability, apChannel);
 
         pDot11PowerCapability->hdr.eleId = DOT11_CAPABILITY_ELE_ID;
         pDot11PowerCapability->hdr.eleLen = DOT11_CAPABILITY_ELE_LEN;
-        pDot11PowerCapability->minTxPower = DBM_DIV_10_2_DBM(MIN_TX_POWER);
+        pDot11PowerCapability->minTxPower = WLAN_MIN_TX_POWER_DBM;
         if (TRUE == regulatoryDomain_getChMaxPower(apChannel, &maxTxPower))
         {
             pDot11PowerCapability->maxTxPower = maxTxPower;
         }
         else
         {
-            pDot11PowerCapability->maxTxPower = DBM_DIV_10_2_DBM(MAX_TX_POWER);
+            pDot11PowerCapability->maxTxPower = WLAN_MAX_TX_POWER_DBM;
         }
 
         pPack += DOT11_CAPABILITY_ELE_LEN + sizeof(dot11_eleHdr_t);
@@ -657,6 +658,9 @@ int32_t ti_drv_txAssocReqPacket(ti_driver_ifData_t *apDrv,
  
 
 #ifndef DISABLE_WIFI6
+    /* VHT (WiFi5) and HE (WiFi6) are not yet separated - both guarded by DISABLE_WIFI6.
+     * WiFi5 certification is mandatory for WiFi6 certification.
+     * When Wifi5 will need to be implemented a separate guard for VHT (WiFi5) is needed. */
     //if channel is 5GHZ, then add VHT Support
     if(!(is_bg_channel(apChannel)))
     {
@@ -1046,11 +1050,37 @@ int32_t ti_drv_txDeauthDisassocPacket(ti_driver_ifData_t *apDrv,
     }
 
     //Wait for tx complete
+    // Check for FW crash before waiting to avoid unnecessary timeout
+    if (gFwCrashOccurred)
+    {
+        GTRACE(GRP_GENERAL_ERROR, "ERROR: FW crash detected before TX complete wait");
+        MLME_REPORT_PRINT_ERROR("\n\rERROR: FW crash detected, skipping TX complete wait");
+        if (pkt != NULL)
+        {
+            TTxCtrlBlk *pPktCtrlBlk = udataNet_ExtractTxCtrlBlkFromDesc(pkt);
+            if (pPktCtrlBlk != NULL && pPktCtrlBlk->tTxPktParams.pInputPkt != NULL)
+            {
+                txCtrl_FreePacket(pPktCtrlBlk, STATUS_XMIT_ERROR);
+            }
+        }
+        ret = NOK;
+        goto fail;
+    }
+
     osiRetVal = osi_SyncObjWait(&gtxCompleteSyncObj, TX_COMPLETE_TIMEOUT);
     if (OSI_OK != osiRetVal)
     {
         GTRACE(GRP_GENERAL_ERROR, "ERROR: osi_SyncObjectWait failed, rc = %d", osiRetVal);
         MLME_REPORT_PRINT_ERROR("\n\rERROR: osi_SyncObjectWait failed, rc = %d", osiRetVal);
+        if (gFwCrashOccurred && pkt != NULL)
+        {
+            TTxCtrlBlk *pPktCtrlBlk = udataNet_ExtractTxCtrlBlkFromDesc(pkt);
+            if (pPktCtrlBlk != NULL && pPktCtrlBlk->tTxPktParams.pInputPkt != NULL)
+            {
+                txCtrl_FreePacket(pPktCtrlBlk, STATUS_XMIT_ERROR);
+            }
+        }
+
         ret = NOK;
         goto fail;
     }

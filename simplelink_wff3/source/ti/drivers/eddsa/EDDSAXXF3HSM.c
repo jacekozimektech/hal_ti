@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, Texas Instruments Incorporated
+ * Copyright (c) 2025-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,8 +51,11 @@
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include <ti/drivers/power/PowerCC27XX.h>
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include <ti/drivers/power/PowerCC23X1.h>
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     #include <ti/drivers/power/PowerWFF3.h>
+    #include <ti/drivers/xmem/XMEMWFF3.h>
 #endif
 
 /* KeyStore-related includes */
@@ -481,6 +484,17 @@ int_fast16_t EDDSA_generatePublicKey(EDDSA_Handle handle, EDDSA_OperationGenerat
     object->paramAssetID      = 0U;
     object->tempAssetID       = 0U;
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Callback mode is not supported when the EDDSA object is in external memory
+     * because the HSM writes the derived public key to object->signature via the
+     * output bounce buffer, which requires synchronous copy-back.
+     */
+    if ((XMEMWFF3_isAddrExternal((uintptr_t)object)) && (object->returnBehavior == EDDSA_RETURN_BEHAVIOR_CALLBACK))
+    {
+        return EDDSA_STATUS_FEATURE_NOT_SUPPORTED;
+    }
+#endif
+
     /* Perform the following operations:
      * - Check the HSM HW status
      * - Setup Driver metadata and EC curve parameters
@@ -563,6 +577,17 @@ int_fast16_t EDDSA_sign(EDDSA_Handle handle, EDDSA_OperationSign *operation)
         return EDDSAXXF3HSM_STATUS_INVALID_MESSAGE_LENGTH;
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Callback mode is not supported when the EDDSA object is in external memory
+     * because the HSM writes the signature to object->signature via the output
+     * bounce buffer, which requires synchronous copy-back.
+     */
+    if ((XMEMWFF3_isAddrExternal((uintptr_t)object)) && (object->returnBehavior == EDDSA_RETURN_BEHAVIOR_CALLBACK))
+    {
+        return EDDSA_STATUS_FEATURE_NOT_SUPPORTED;
+    }
+#endif
+
     /* Perform the following operations:
      * - Check the HSM HW status
      * - Setup Driver metadata and EC curve parameters
@@ -595,12 +620,19 @@ inline static void EDDSAXXF3HSM_computeIntermediateHashUpdatePostProcessing(uint
      */
     if (tokenResult == EIP130TOKEN_RESULT_SUCCESS)
     {
+        object->input += object->inputLength;
         object->inputLengthRemaining -= object->inputLength;
 
-        /* If remaining input length is larger than 4095, then hash the excess outside of the
-         * EdDSA HSM operation sequence.
+        /* If remaining input length exceeds the sign-update limit, or the
+         * message is in external memory and exceeds the input bounce buffer,
+         * hash the excess outside of the EdDSA HSM operation sequence.
          */
-        if (object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+        if ((object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status = EDDSAXXF3HSM_computeIntermediateHash(handle,
                                                           EDDSAXXF3HSM_computeIntermediateHashUpdatePostProcessing);
@@ -649,12 +681,19 @@ inline static void EDDSAXXF3HSM_computeIntermediateHashFinalPostProcessing(uintp
      */
     if (tokenResult == EIP130TOKEN_RESULT_SUCCESS)
     {
+        object->input += object->inputLength;
         object->inputLengthRemaining -= object->inputLength;
 
-        /* If remaining input length is larger than 4095, then hash the excess outside of the
-         * EdDSA HSM operation sequence.
+        /* If remaining input length exceeds the sign-update limit, or the
+         * message is in external memory and exceeds the input bounce buffer,
+         * hash the excess outside of the EdDSA HSM operation sequence.
          */
-        if (object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+        if ((object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status = EDDSAXXF3HSM_computeIntermediateHash(handle,
                                                           EDDSAXXF3HSM_computeIntermediateHashFinalPostProcessing);
@@ -710,16 +749,19 @@ inline static void EDDSAXXF3HSM_signInitialPostProcessing(uintptr_t arg0)
         object->inputLengthRemaining -= object->inputLength;
 
         /* The EdDSA sign sequence of operations:
-         * - Sign initial phase which can only process up to 64 bytes. (If total length is less than 64 bytes, then pass
-         * the entire message.)
-         * - If message length is greater than 64 bytes (Sign initial max input length) + 4095 (Sign update max input
-         * length), then compute intermediate hash outside of the EdDSA HSM operation sequence.
-         * - Sign update phase which can process up to 4095 bytes.
-         * - If message length is greater than 4095 bytes, then compute intermediate hash outside of the EdDSA HSM
-         * operation sequence.
-         * - Sign finalize phase which can process up to 4095 bytes.
+         * - Sign initial phase: processes up to 96 bytes (or the full message if shorter).
+         * - Intermediate hash loop (if remaining > EDDSA_SIGN_UPDATE_MAX_LENGTH, or on CC35XX
+         *   if remaining > inputBounce.size): raw SHA-512 continuation outside the EdDSA sequence.
+         * - Sign update phase: processes up to 4095 bytes (or inputBounce.size on CC35XX).
+         * - Intermediate hash loop again for the second hash pass (same thresholds).
+         * - Sign finalize phase: processes up to 64 bytes and produces the signature.
          */
-        if (operation->preHashedMessageLength > (EDDSA_SIGN_INITIAL_MAX_LENGTH + EDDSA_SIGN_UPDATE_MAX_LENGTH))
+        if ((operation->preHashedMessageLength > (EDDSA_SIGN_INITIAL_MAX_LENGTH + EDDSA_SIGN_UPDATE_MAX_LENGTH))
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status = EDDSAXXF3HSM_computeIntermediateHash(handle,
                                                           EDDSAXXF3HSM_computeIntermediateHashUpdatePostProcessing);
@@ -830,6 +872,16 @@ static int_fast16_t EDDSAXXF3HSM_computeIntermediateHash(EDDSA_Handle handle, HS
         object->inputLength = EDDSA_DMA_MAX_LENGTH - (4U * 128);
     }
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Cap to the input bounce buffer so stageInput does not overflow. Only
+     * needed when the message is in external memory.
+     */
+    if ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) && (object->inputLength > HSMXXF3_inputBounce.size))
+    {
+        object->inputLength = HSMXXF3_inputBounce.size;
+    }
+#endif
+
     /* Make sure the length passed to the SHA2 hasing operation is block-size aligned. */
     object->inputLength = (size_t)(object->inputLength & (~(128U - 1U)));
 
@@ -895,9 +947,17 @@ inline static void EDDSAXXF3HSM_signUpdatePostProcessing(uintptr_t arg0)
             object->inputLengthRemaining -= EDDSA_SIGN_FINALIZE_MAX_LENGTH;
         }
 
-        /* If remaining input length is larger than 4095, then hash the excess outside of the
-         * EdDSA HSM operation sequence. */
-        if (object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+        /* If remaining input length exceeds the sign-update limit, or the
+         * message is in external memory and exceeds the input bounce buffer,
+         * hash the excess outside of the EdDSA HSM operation
+         * sequence.
+         */
+        if ((object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status = EDDSAXXF3HSM_computeIntermediateHash(handle,
                                                           EDDSAXXF3HSM_computeIntermediateHashFinalPostProcessing);
@@ -1104,9 +1164,15 @@ inline static void EDDSAXXF3HSM_computeIntermediateHashVerifyFinalPostProcessing
      */
     if (tokenResult == EIP130TOKEN_RESULT_SUCCESS)
     {
+        object->input += object->inputLength;
         object->inputLengthRemaining -= object->inputLength;
 
-        if (object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+        if ((object->inputLengthRemaining > EDDSA_SIGN_UPDATE_MAX_LENGTH)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status =
                 EDDSAXXF3HSM_computeIntermediateHash(handle,
@@ -1163,13 +1229,17 @@ inline static void EDDSAXXF3HSM_verifyInitialPostProcessing(uintptr_t arg0)
         object->inputLengthRemaining -= object->inputLength;
 
         /* The EdDSA verify sequence of operations:
-         * - Verify initial phase which can only process up to 64 bytes. (If total length is less than 64 bytes, then
-         * pass the entire message.)
-         * - If message length is greater than 64 bytes (Sign initial max input length) + 4095 (Sign update max input
-         * length), then compute intermediate hash outside of the EdDSA HSM operation sequence.
-         * - Verify finalize phase which can process up to 4095 bytes.
+         * - Verify initial phase: processes up to 64 bytes (or the full message if shorter).
+         * - Intermediate hash loop (if remaining > EDDSA_SIGN_UPDATE_MAX_LENGTH, or on CC35XX
+         *   if remaining > inputBounce.size): raw SHA-512 continuation outside the EdDSA sequence.
+         * - Verify finalize phase: processes up to 4095 bytes (or inputBounce.size on CC35XX).
          */
-        if (operation->preHashedMessageLength > (EDDSA_VERIFY_INITIAL_MAX_LENGTH + EDDSA_SIGN_UPDATE_MAX_LENGTH))
+        if ((operation->preHashedMessageLength > (EDDSA_VERIFY_INITIAL_MAX_LENGTH + EDDSA_SIGN_UPDATE_MAX_LENGTH))
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+            || ((XMEMWFF3_isAddrExternal((uintptr_t)object->input)) &&
+                (object->inputLengthRemaining > HSMXXF3_inputBounce.size))
+#endif
+        )
         {
             status =
                 EDDSAXXF3HSM_computeIntermediateHash(handle,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -68,6 +68,7 @@
 #include DeviceFamily_constructPath(inc/hw_ints.h)
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    #include <ti/drivers/xmem/XMEMWFF3.h>
     /* HSM Register names for CC35XX are different compared to CC27XX
      * Below mapping helps to keep the source code same between
      * both devices.
@@ -555,6 +556,16 @@ int_fast16_t ECDSA_sign(ECDSA_Handle handle, ECDSA_OperationSign *operation)
     }
 
     object->digestLength = (ECDSA_DigestLength)digestLengthBits;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Callback mode is not supported when the ECDSA object is in external memory
+     * because the object contains the signature buffer used by the HSM.
+     */
+    if (XMEMWFF3_isAddrExternal((uintptr_t)object) && object->returnBehavior == ECDSA_RETURN_BEHAVIOR_CALLBACK)
+    {
+        return ECDSA_STATUS_FEATURE_NOT_SUPPORTED;
+    }
+#endif
 
     /* Perform the following operations:
      * - Check the HSM HW status

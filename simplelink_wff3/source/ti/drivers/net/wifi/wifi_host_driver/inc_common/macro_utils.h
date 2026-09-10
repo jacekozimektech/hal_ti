@@ -535,11 +535,6 @@ static inline int popcount32(uint32_t x) {
 #       define __INLINE__   inline
 #endif
 
-
-
-
-//----------------------------------------------------------------------------//
-// June-2014 - builtin_types_comparison                                       //
 //----------------------------------------------------------------------------//
 // In order to verify whether type is a volatile (for example:                //
 // bit banding usage), comparison of type performed and causing compilation   //
@@ -677,28 +672,7 @@ static inline int popcount32(uint32_t x) {
  * \def GET_RSSI_VAL_FROM_DESC
  * \brief Macro which returns RSSI stored on the descriptor\n
  */
-//#ifdef AX_DEBUG_FIXES
-//#define GET_RSSI_VAL_FROM_DESC(desc)      (-55)
-//#else
 #define GET_RSSI_VAL_FROM_DESC(desc)      ( ((int8_t)(desc->phy_information1.rssi) - 110) )
-//#endif
-
-/****************************************************************************
-*   ALIGNN_TO_4()
-*
-*   DESCRIPTION :
-*       round up -align to 4 .
-*
-*   PARAMETERS  :
-*       number
-*
-*   RETURNS     :
-*       the aligned value
-*
-*   *NOTES      :
-*
-****************************************************************************/
-
 
 /**
  * \def WLANTOHL

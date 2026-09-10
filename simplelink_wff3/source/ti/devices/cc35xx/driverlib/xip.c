@@ -3,7 +3,7 @@
  *
  *  Description:    Driver for the XIP peripheral
  *
- *  Copyright (c) 2024-2025 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -174,7 +174,7 @@ uint32_t XIPGetUDMAIrqStatus(uint32_t channelSelect)
 // Disable the OTFDE peripheral
 //
 //*****************************************************************************
-void __attribute__((section(".TI.ramfunc"))) XIPDisableOTFDE(void)
+void __attribute__((noinline, section(".TI.ramfunc"))) XIPDisableOTFDE(void)
 {
     // Assume the user know when it is ok to disable the OTFDE
     // (not in a middle of udma transactions and not when executing code from flash)
@@ -188,7 +188,7 @@ void __attribute__((section(".TI.ramfunc"))) XIPDisableOTFDE(void)
 // Enable the OTFDE peripheral
 //
 //*****************************************************************************
-void __attribute__((section(".TI.ramfunc"))) XIPEnableOTFDE(void)
+void __attribute__((noinline, section(".TI.ramfunc"))) XIPEnableOTFDE(void)
 {
 
     HWREG(HOST_XIP_REGS_BASE + HOST_XIP_O_OTSWCTL0) = HOST_XIP_OTSWCTL0_ENREQ;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,8 +46,10 @@
 
 #include <ti/drivers/xmem/XMEMWFF3.h>
 #include <ti/drivers/xmem/flash/FlashWFF3.h>
+#include <ti/drivers/utils/Math.h>
 
 #include <ti/devices/DeviceFamily.h>
+#include DeviceFamily_constructPath(driverlib/dcache.h)
 
 #define PHY_OFFSET             12
 #define PHYSICAL_ADDR          0
@@ -63,32 +65,97 @@ static uint32_t ConvertOffsetToAddr(XMEM_Handle handle, size_t offset, size_t Ad
 static void flashTypeSelection(void);
 
 const uint8_t XMEM_count = XMEM_NUM_HANDLER;
-static uint8_t xmem_num  = 0; /* number of open handlers */
-
-/*
- *  Mutex to synchronize access to flash region.
+/* xmem_num, writeMutex, writeMutexStruct, isInitialized must be in TCM_DRAM:
+ * they are accessed by XMEMWFF3_init/open/lock/unlock which can be called
+ * from within the PS_RAM-inaccessible window (OTFDE disabled / OSPI in
+ * flash mode).
  */
-static MutexP_Handle writeMutex = NULL;
-static MutexP_Struct writeMutexStruct;
+static uint8_t xmem_num __attribute__((section(".internalRAM.bss")));
+static MutexP_Handle writeMutex __attribute__((section(".internalRAM.bss")));
+static MutexP_Struct writeMutexStruct __attribute__((section(".internalRAM.bss")));
 
-static size_t sectorBaseMask; /* for efficient argument checking */
-static void *verifyBuf;       /*!< Write Pre/Post verify buffer */
-static uint8_t verifyBuffer[VERIFBUF_SIZE_IN_BYTES];
-static void *xmemDataToWriteBuf;                               /*!< Write  buffer */
-static uint8_t __attribute__((aligned(4))) xmemDataToWriteBuffer[WRITE_SIZE_IN_BYTES + 4]; /*!< handling unaligned write */
-static void *xmemDataToReadBuf;                                /*!< Read  buffer */
-static uint8_t __attribute__((aligned(4))) xmemDataToReadBuffer[READ_SIZE_IN_BYTES + 4];   /*!< handling unaligned read */
+/* These variables are accessed inside the PS_RAM-inaccessible window
+ * (between FlashStigPreConfigOp and FlashStigPostConfigOp).
+ * Place them in .internalRAM (DRAM) so they remain reachable when PS_RAM
+ * is offline (OTFDE disabled / OSPI in flash mode).
+ */
+static size_t sectorBaseMask __attribute__((section(".internalRAM.bss")));
+static void *verifyBuf __attribute__((section(".internalRAM.bss")));
+__attribute__((section(".internalRAM.bss"), aligned(4))) static uint8_t verifyBuffer[VERIFBUF_SIZE_IN_BYTES];
+static void *xmemDataToWriteBuf __attribute__((section(".internalRAM.bss")));
+__attribute__((section(".internalRAM.bss"),
+               aligned(4))) static uint8_t xmemDataToWriteBuffer[WRITE_SIZE_IN_BYTES + 4]; /*!<
+                                                                                            * handling
+                                                                                            * unaligned
+                                                                                            * write
+                                                                                            */
+static void *xmemDataToReadBuf __attribute__((section(".internalRAM.bss")));
+__attribute__((section(".internalRAM.bss"),
+               aligned(4))) static uint8_t xmemDataToReadBuffer[READ_SIZE_IN_BYTES + 4]; /*!< handling
+                                                                                          * unaligned
+                                                                                          * read
+                                                                                          */
 
-extern uint32_t _Boot_report_address;
-#define BOOT_REPORT_ADDR ((uint32_t)(&_Boot_report_address))
+extern uint8_t _Boot_report_address[];
+#define BOOT_REPORT_ADDR ((uint32_t)(_Boot_report_address))
 
-static bool isInitialized = false;
+static bool isInitialized __attribute__((section(".internalRAM.data"))) = false;
 
-XMEMWFF3_HWAttrs XMEMWFF3_hwAttrs;
+__attribute__((section(".internalRAM.bss"))) XMEMWFF3_HWAttrs XMEMWFF3_hwAttrs;
 
-XMEMWFF3_Object XMEMWFF3_objects[XMEM_NUM_HANDLER];
+__attribute__((section(".internalRAM.bss"))) XMEMWFF3_Object XMEMWFF3_objects[XMEM_NUM_HANDLER];
 
 XMEM_Config XMEM_config[CONFIG_XMEM_COUNT] = {{.object = &(XMEMWFF3_objects), .hwAttrs = &(XMEMWFF3_hwAttrs)}};
+
+/* Flush D-Cache before FlashRead (PSRAM only).
+ * Caller must wrap with HwiP_disable/HwiP_restore.
+ */
+#define XMEM_CACHE_FLUSH_IF_PSRAM(obj)          \
+    do                                          \
+    {                                           \
+        if ((obj)->deviceNum == XMEM_MEM_PSRAM) \
+        {                                       \
+            DCacheFlush();                      \
+        }                                       \
+    } while (0)
+
+/* Invalidate D-Cache after FlashWrite (PSRAM only).
+ * Caller must wrap with HwiP_disable/HwiP_restore.
+ */
+#define XMEM_CACHE_INVALIDATE_IF_PSRAM(obj)     \
+    do                                          \
+    {                                           \
+        if ((obj)->deviceNum == XMEM_MEM_PSRAM) \
+        {                                       \
+            DCacheInvalidate();                 \
+        }                                       \
+    } while (0)
+
+/* Flush + Disable D-Cache before FlashWrite (PSRAM only).
+ * Caller must wrap with HwiP_disable/HwiP_restore.
+ */
+#define XMEM_CACHE_FLUSH_DISABLE_FOR_WRITE_IF_PSRAM(obj) \
+    do                                                   \
+    {                                                    \
+        if ((obj)->deviceNum == XMEM_MEM_PSRAM)          \
+        {                                                \
+            DCacheFlush();                               \
+            DCacheDisable();                             \
+        }                                                \
+    } while (0)
+
+/* Enable + Invalidate D-Cache after FlashWrite (PSRAM only).
+ * Caller must wrap with HwiP_disable/HwiP_restore.
+ */
+#define XMEM_CACHE_INVALIDATE_ENABLE_IF_PSRAM(obj) \
+    do                                             \
+    {                                              \
+        if ((obj)->deviceNum == XMEM_MEM_PSRAM)    \
+        {                                          \
+            DCacheEnable();                        \
+            DCacheInvalidate();                    \
+        }                                          \
+    } while (0)
 
 /*
  *  ======== XMEMWFF3_close ========
@@ -133,7 +200,7 @@ int_fast16_t XMEMWFF3_erase(XMEM_Handle handle, size_t offset, size_t size)
     object = handle->object;
 
     /* STIG operation are not supported for PSRAM */
-    if (object->deviceNum == XMEM_PSRAM)
+    if (object->deviceNum == XMEM_MEM_PSRAM)
     {
         return XMEM_STATUS_ERROR;
     }
@@ -334,7 +401,7 @@ XMEM_Handle XMEMWFF3_open(XMEM_Params *params)
     }
 
     /* Validate target device */
-    if (object->deviceNum != XMEM_FLASH && object->deviceNum != XMEM_PSRAM)
+    if (object->deviceNum != XMEM_MEM_FLASH && object->deviceNum != XMEM_MEM_PSRAM)
     {
         memset(object, 0, sizeof(XMEMWFF3_Object));
         free(handle);
@@ -359,7 +426,6 @@ XMEM_Handle XMEMWFF3_open(XMEM_Params *params)
  */
 int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size_t bufferSize, uint_fast16_t flags)
 {
-    uint32_t clockPTick;
     uint32_t clockPTickPeriod;
     unsigned int key;
 
@@ -384,7 +450,7 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
     if (flags & XMEM_READ_STIG)
     {
         /* STIG operation are not supported for PSRAM */
-        if (object->deviceNum == XMEM_PSRAM)
+        if (object->deviceNum == XMEM_MEM_PSRAM)
         {
             return XMEM_STATUS_ERROR;
         }
@@ -425,7 +491,7 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
          * Ensure SysTimer is enabled, to be able to read the SysTimer counter
          * value.
          */
-        clockPTick       = ClockP_getSystemTicks();
+
         clockPTickPeriod = ClockP_getSystemTickPeriod();
         FlashSetTickPeriod(clockPTickPeriod);
 
@@ -446,10 +512,6 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
     }
     else
     {
-        int remainingBytes = bufferSize;
-        uint32_t flashlogicAddr;
-        uint32_t alignment;
-
         if (offset + bufferSize > object->regionSize)
         {
             return (XMEM_STATUS_INV_OFFSET);
@@ -460,6 +522,145 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
          *  else to erase the region while we are reading it.
          */
         uintptr_t mutexKey = MutexP_lock(writeMutex);
+
+        /* PSRAM: Check if both src (RAM buffer) and dst (PSRAM) are 4-byte aligned */
+        if (object->deviceNum == XMEM_MEM_PSRAM)
+        {
+            uint32_t psramAddr = ConvertOffsetToAddr(handle, offset, LOGIC_ADDR);
+
+            /* PSRAM destination buffer: DMA cannot do PSRAM-to-PSRAM, use memcpy directly */
+            if (XMEMWFF3_addrToType((uintptr_t)buffer) == XMEM_MEM_PSRAM)
+            {
+                memcpy(buffer, (void *)psramAddr, bufferSize);
+                MutexP_unlock(writeMutex, mutexKey);
+                return (XMEM_STATUS_SUCCESS);
+            }
+
+            uint32_t psramAlignment = psramAddr & 0x3;
+            uint32_t bufAlignment   = (uint32_t)(uintptr_t)buffer & 0x3;
+
+            /* If both are 4-byte aligned (or can be aligned together), use simple DMA approach */
+            if (psramAlignment == bufAlignment)
+            {
+                int remainingBytes = bufferSize;
+
+                /* Handle head: align to 4-byte boundary with memcpy */
+                if (psramAlignment != 0)
+                {
+                    size_t headBytes = 4 - psramAlignment;
+                    if (headBytes > remainingBytes)
+                    {
+                        headBytes = remainingBytes;
+                    }
+                    memcpy(buffer, (void *)psramAddr, headBytes);
+                    buffer += headBytes;
+                    psramAddr += headBytes;
+                    remainingBytes -= headBytes;
+                }
+
+                /* Now both are 4-byte aligned - use DMA for the rest */
+                if (remainingBytes >= 4)
+                {
+                    /* Round down to multiple of 4 for DMA */
+                    size_t dmaBytes = remainingBytes & ~0x3;
+
+                    uintptr_t readCacheKey = HwiP_disable();
+                    XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                    /* Read from psram to the buffer */
+                    FlashRead((uint32_t *)psramAddr, (uint32_t *)buffer, dmaBytes);
+
+                    HwiP_restore(readCacheKey);
+
+                    buffer += dmaBytes;
+                    psramAddr += dmaBytes;
+                    remainingBytes -= dmaBytes;
+                }
+
+                /* Handle tail with memcpy (0-3 bytes) */
+                if (remainingBytes > 0)
+                {
+                    memcpy(buffer, (void *)psramAddr, remainingBytes);
+                }
+
+                MutexP_unlock(writeMutex, mutexKey);
+                return (XMEM_STATUS_SUCCESS);
+            }
+
+            /* Alignments differ - use read-modify-write with 256-byte pages */
+            int remainingBytes = bufferSize;
+            uint32_t psramlogicAddr;
+            uint32_t alignment;
+
+            /* Handling the constraint of reading from 4 Bytes aligned address */
+            alignment = offset % 4;
+
+            /* Handle the constraint of reading multiples of 256 Bytes at a time. */
+            while (remainingBytes >= READ_SIZE_IN_BYTES)
+            {
+                /* Set address to read from - align to 256-byte boundary */
+                psramlogicAddr = ConvertOffsetToAddr(handle, offset, LOGIC_ADDR) - alignment;
+
+                uintptr_t readCacheKey = HwiP_disable();
+                XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                /* Read from PSRAM into intermediate buffer */
+                FlashRead((uint32_t *)psramlogicAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+
+                HwiP_restore(readCacheKey);
+
+                /* Copy data to user buffer */
+                memcpy(buffer, xmemDataToReadBuf + alignment, READ_SIZE_IN_BYTES - alignment);
+
+                buffer += READ_SIZE_IN_BYTES - alignment;
+                remainingBytes -= (READ_SIZE_IN_BYTES - alignment);
+                offset += READ_SIZE_IN_BYTES - alignment;
+                alignment = 0;
+            }
+
+            /* Less than 256-bytes remaining */
+            if (remainingBytes > 0)
+            {
+                if (offset + READ_SIZE_IN_BYTES > object->regionSize)
+                {
+                    alignment = offset & 0xFF;
+                }
+
+                psramlogicAddr = ConvertOffsetToAddr(handle, offset, LOGIC_ADDR) - alignment;
+
+                uintptr_t readCacheKey = HwiP_disable();
+                XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                if ((alignment + remainingBytes) > READ_SIZE_IN_BYTES)
+                {
+                    size_t firstReadSize = READ_SIZE_IN_BYTES - alignment;
+
+                    FlashRead((uint32_t *)psramlogicAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+                    memcpy(buffer, xmemDataToReadBuf + alignment, firstReadSize);
+
+                    uint8_t *nextBuffer = (uint8_t *)buffer + firstReadSize;
+                    size_t nextSize     = remainingBytes - firstReadSize;
+                    uint32_t nextAddr   = (uint32_t)psramlogicAddr + READ_SIZE_IN_BYTES;
+
+                    FlashRead((uint32_t *)nextAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+                    memcpy((uint8_t *)nextBuffer, xmemDataToReadBuf, nextSize);
+                }
+                else
+                {
+                    FlashRead((uint32_t *)psramlogicAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+                    memcpy(buffer, xmemDataToReadBuf + alignment, remainingBytes);
+                }
+                HwiP_restore(readCacheKey);
+            }
+
+            MutexP_unlock(writeMutex, mutexKey);
+            return (XMEM_STATUS_SUCCESS);
+        }
+
+        /* Flash: Original complex 256-byte aligned logic */
+        int remainingBytes = bufferSize;
+        uint32_t flashlogicAddr;
+        uint32_t alignment;
 
         /* Handling the constraint of reading from 4 Bytes aligned address */
         alignment = offset % 4;
@@ -512,6 +713,7 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
 
                 /* First read operation */
                 FlashRead((uint32_t *)flashlogicAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+
                 memcpy(buffer, xmemDataToReadBuf + alignment, firstReadSize);
 
                 /* Second read operation for remaining bytes */
@@ -520,6 +722,7 @@ int_fast16_t XMEMWFF3_read(XMEM_Handle handle, size_t offset, void *buffer, size
                 uint32_t nextAddr   = (uint32_t)flashlogicAddr + READ_SIZE_IN_BYTES;
 
                 FlashRead((uint32_t *)nextAddr, (uint32_t *)xmemDataToReadBuf, READ_SIZE_IN_BYTES);
+
                 memcpy((uint8_t *)nextBuffer, xmemDataToReadBuf, nextSize);
             }
             else
@@ -587,7 +790,6 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
     uint32_t *srcBuf, *dstBuf;
     uint8_t *_srcBuf, *_dstBuf;
     uint32_t totalSize;
-    uint32_t clockPTick;
     uint32_t clockPTickPeriod;
     size_t originalOffset = offset;
     void *originalBuffer  = buffer;
@@ -604,7 +806,7 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
     if (flags & XMEM_WRITE_STIG)
     {
         /* STIG operation are not supported for PSRAM */
-        if (object->deviceNum == XMEM_PSRAM)
+        if (object->deviceNum == XMEM_MEM_PSRAM)
         {
             return XMEM_STATUS_ERROR;
         }
@@ -677,17 +879,10 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
         totalSize = bufferSize;
 
         j = 0;
-
         while (totalSize > 0)
         {
-            if (totalSize > hwAttrs->flashType.verifyBufSize)
-            {
-                size = hwAttrs->flashType.verifyBufSize;
-            }
-            else
-            {
-                size = totalSize;
-            }
+            size = Math_MIN(hwAttrs->flashType.verifyBufSize, VERIFBUF_SIZE_IN_BYTES);
+            size = Math_MIN(size, totalSize);
 
             /* Read destination before the change for pre-verify expected change */
             _dstBuf = (uint8_t *)verifyBuf;
@@ -724,7 +919,6 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
          * Ensure SysTimer is enabled, to be able to read the SysTimer counter
          * value.
          */
-        clockPTick       = ClockP_getSystemTicks();
         clockPTickPeriod = ClockP_getSystemTickPeriod();
         FlashSetTickPeriod(clockPTickPeriod);
 
@@ -733,14 +927,157 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
     }
     else
     {
+        /* PSRAM: Check if both src (RAM buffer) and dst (PSRAM) are 4-byte aligned */
+        if (object->deviceNum == XMEM_MEM_PSRAM)
+        {
+            uint32_t psramAddr = ConvertOffsetToAddr(handle, offset, LOGIC_ADDR);
+
+            /* PSRAM source buffer: DMA cannot do PSRAM-to-PSRAM, use memcpy directly */
+            if (XMEMWFF3_addrToType((uintptr_t)buffer) == XMEM_MEM_PSRAM)
+            {
+                memcpy((void *)psramAddr, buffer, bufferSize);
+                MutexP_unlock(writeMutex, mutexKey);
+                return (XMEM_STATUS_SUCCESS);
+            }
+
+            uint32_t psramAlignment = psramAddr & 0x3;
+            uint32_t bufAlignment   = (uint32_t)(uintptr_t)buffer & 0x3;
+
+            /* If both are 4-byte aligned (or can be aligned together), use simple DMA approach */
+            if (psramAlignment == bufAlignment)
+            {
+                int remainingBytes = bufferSize;
+
+                /* Handle head: align to 4-byte boundary with memcpy */
+                if (psramAlignment != 0)
+                {
+                    size_t headBytes = 4 - psramAlignment;
+                    if (headBytes > remainingBytes)
+                    {
+                        headBytes = remainingBytes;
+                    }
+                    /* memcpy can be used for small sizes */
+                    memcpy((void *)psramAddr, buffer, headBytes);
+                    buffer += headBytes;
+                    psramAddr += headBytes;
+                    remainingBytes -= headBytes;
+                }
+
+                /* Now both are 4-byte aligned - use DMA for the rest */
+                if (remainingBytes >= 4)
+                {
+                    /* Round down to multiple of 4 for DMA */
+                    size_t dmaBytes = remainingBytes & ~0x3;
+
+                    uintptr_t cacheKey = HwiP_disable();
+                    XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                    FlashWrite((uint32_t *)buffer, (uint32_t *)psramAddr, dmaBytes);
+
+                    XMEM_CACHE_INVALIDATE_IF_PSRAM(object);
+                    HwiP_restore(cacheKey);
+
+                    buffer += dmaBytes;
+                    psramAddr += dmaBytes;
+                    remainingBytes -= dmaBytes;
+                }
+
+                /* Handle tail with memcpy (0-3 bytes) */
+                if (remainingBytes > 0)
+                {
+                    memcpy((void *)psramAddr, buffer, remainingBytes);
+                }
+
+                MutexP_unlock(writeMutex, mutexKey);
+                return (XMEM_STATUS_SUCCESS);
+            }
+
+            /* Alignments differ - use read-modify-write with 256-byte pages */
+            srcBuf             = (uint32_t *)xmemDataToWriteBuf;
+            size               = bufferSize;
+            dstBuf             = (uint32_t *)flashlogicStartAddr;
+            int remainingBytes = size;
+            uint32_t alignment;
+
+            alignment = offset % 4;
+
+            /* Handle 256-byte chunks */
+            while (remainingBytes >= WRITE_SIZE_IN_BYTES)
+            {
+                dstBuf = (uint32_t *)(ConvertOffsetToAddr(handle, offset, LOGIC_ADDR) - alignment);
+
+                uintptr_t readCacheKey = HwiP_disable();
+                XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                FlashRead((uint32_t *)dstBuf, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
+                memcpy((uint8_t *)srcBuf + alignment, buffer, READ_SIZE_IN_BYTES - alignment);
+
+                FlashWrite((uint32_t *)srcBuf, (uint32_t *)dstBuf, WRITE_SIZE_IN_BYTES);
+
+                XMEM_CACHE_INVALIDATE_IF_PSRAM(object);
+                HwiP_restore(readCacheKey);
+
+                buffer += READ_SIZE_IN_BYTES - alignment;
+                remainingBytes -= (READ_SIZE_IN_BYTES - alignment);
+                offset += READ_SIZE_IN_BYTES - alignment;
+                alignment = 0;
+            }
+
+            /* Less than 256-bytes remaining */
+            if (remainingBytes > 0)
+            {
+                if (offset + WRITE_SIZE_IN_BYTES > object->regionSize)
+                {
+                    alignment = offset & 0xFF;
+                }
+
+                dstBuf = (uint32_t *)(ConvertOffsetToAddr(handle, offset, LOGIC_ADDR) - alignment);
+
+                uintptr_t readCacheKey = HwiP_disable();
+                XMEM_CACHE_FLUSH_IF_PSRAM(object);
+
+                if (alignment + remainingBytes > WRITE_SIZE_IN_BYTES)
+                {
+                    size_t firstWriteSize = WRITE_SIZE_IN_BYTES - alignment;
+
+                    FlashRead((uint32_t *)dstBuf, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
+                    memcpy((uint8_t *)srcBuf + alignment, buffer, firstWriteSize);
+
+                    FlashWrite((uint32_t *)srcBuf, (uint32_t *)dstBuf, WRITE_SIZE_IN_BYTES);
+
+                    uint8_t *nextBuffer = (uint8_t *)buffer + firstWriteSize;
+                    size_t nextSize     = remainingBytes - firstWriteSize;
+                    uint32_t nextAddr   = (uint32_t)dstBuf + WRITE_SIZE_IN_BYTES;
+
+                    FlashRead((uint32_t *)nextAddr, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
+                    memcpy((uint8_t *)srcBuf, nextBuffer, nextSize);
+
+                    FlashWrite((uint32_t *)srcBuf, (uint32_t *)nextAddr, WRITE_SIZE_IN_BYTES);
+                }
+                else
+                {
+                    FlashRead((uint32_t *)dstBuf, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
+                    memcpy((uint8_t *)srcBuf + alignment, buffer, remainingBytes);
+
+                    FlashWrite((uint32_t *)srcBuf, (uint32_t *)dstBuf, WRITE_SIZE_IN_BYTES);
+                }
+                XMEM_CACHE_INVALIDATE_IF_PSRAM(object);
+                HwiP_restore(readCacheKey);
+            }
+
+            MutexP_unlock(writeMutex, mutexKey);
+            return (XMEM_STATUS_SUCCESS);
+        }
+
+        /* Flash: Original complex 256-byte aligned logic */
         srcBuf             = (uint32_t *)xmemDataToWriteBuf;
         size               = bufferSize;
         dstBuf             = (uint32_t *)flashlogicStartAddr;
         int remainingBytes = size;
         uint32_t alignment;
 
-        /* Handling the constraint of writing from 4 Bytes aligned address */
-        alignment = offset % 4;
+        /* Handling the constraint of writing from 256-byte aligned address to prevent sector crossing */
+        alignment = offset % WRITE_SIZE_IN_BYTES;
 
         /* Handle the constraint of writing multiples of 256 Bytes at a time. */
         while (remainingBytes >= WRITE_SIZE_IN_BYTES)
@@ -794,6 +1131,7 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
                 /* First write operation */
                 FlashRead((uint32_t *)dstBuf, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
                 memcpy((uint8_t *)srcBuf + alignment, buffer, firstWriteSize);
+
                 FlashWrite((uint32_t *)srcBuf, (uint32_t *)dstBuf, WRITE_SIZE_IN_BYTES);
 
                 /* Second write operation for remaining bytes */
@@ -803,6 +1141,7 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
 
                 FlashRead((uint32_t *)nextAddr, (uint32_t *)srcBuf, READ_SIZE_IN_BYTES);
                 memcpy((uint8_t *)srcBuf, nextBuffer, nextSize);
+
                 FlashWrite((uint32_t *)srcBuf, (uint32_t *)nextAddr, WRITE_SIZE_IN_BYTES);
             }
             else
@@ -824,7 +1163,6 @@ int_fast16_t XMEMWFF3_write(XMEM_Handle handle, size_t offset, void *buffer, siz
 
     if (status != 0)
     {
-        MutexP_unlock(writeMutex, mutexKey);
         retval = XMEM_STATUS_ERROR;
     }
     else if (flags & XMEM_WRITE_POST_VERIFY)
@@ -965,7 +1303,6 @@ static int_fast16_t doErase(XMEM_Handle handle, size_t offset, size_t size)
 
     unsigned int key;
     uint32_t status = 0;
-    uint32_t clockPTick;
     uint32_t clockPTickPeriod;
     int_fast16_t rangeStatus;
 
@@ -987,7 +1324,6 @@ static int_fast16_t doErase(XMEM_Handle handle, size_t offset, size_t size)
          * Ensure SysTimer is enabled, to be able to read the SysTimer counter
          * value.
          */
-        clockPTick       = ClockP_getSystemTicks();
         clockPTickPeriod = ClockP_getSystemTickPeriod();
         FlashSetTickPeriod(clockPTickPeriod);
         status = (uint32_t)FlashSectorErase(startAddrPhy, object->deviceNum);
@@ -1974,4 +2310,48 @@ static void flashTypeSelection(void)
                 break;
         }
     }
+}
+
+/*
+ *  ======== XMEMWFF3_addrToType ========
+ */
+XMEM_MemType XMEMWFF3_addrToType(uintptr_t addr)
+{
+    if (((addr >= EXT_PSRAM_BASE) && (addr < (EXT_PSRAM_BASE + XMEM_MAX_PSRAM_SIZE))) ||
+        ((addr >= EXT_PSRAM_SEC_BASE) && (addr < (EXT_PSRAM_SEC_BASE + XMEM_MAX_PSRAM_SIZE))))
+    {
+        return XMEM_MEM_PSRAM;
+    }
+
+    if (((addr >= EXT_FLASH_BASE) && (addr < (EXT_FLASH_BASE + XMEM_MAX_FLASH_SIZE))) ||
+        ((addr >= EXT_FLASH_SEC_BASE) && (addr < (EXT_FLASH_SEC_BASE + XMEM_MAX_FLASH_SIZE))))
+    {
+        return XMEM_MEM_FLASH;
+    }
+
+    return XMEM_MEM_INTERNAL;
+}
+
+/*
+ *  ======== XMEMWFF3_isAddrExternal ========
+ */
+bool XMEMWFF3_isAddrExternal(uintptr_t addr)
+{
+    return XMEMWFF3_addrToType(addr) != XMEM_MEM_INTERNAL;
+}
+
+/*
+ *  ======== XMEMWFF3_addrToOffset ========
+ */
+size_t XMEMWFF3_addrToOffset(uintptr_t addr)
+{
+
+    XMEM_MemType memType = XMEMWFF3_addrToType(addr);
+
+    if (memType == XMEM_MEM_PSRAM)
+    {
+        return (addr >= EXT_PSRAM_SEC_BASE) ? (size_t)(addr - EXT_PSRAM_SEC_BASE) : (size_t)(addr - EXT_PSRAM_BASE);
+    }
+
+    return (addr >= EXT_FLASH_SEC_BASE) ? (size_t)(addr - EXT_FLASH_SEC_BASE) : (size_t)(addr - EXT_FLASH_BASE);
 }

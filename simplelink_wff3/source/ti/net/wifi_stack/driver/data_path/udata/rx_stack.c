@@ -124,7 +124,7 @@ void* RxBufAlloc(uint32_t len)
     if (pRxPkt == NULL)
     {
         /* No error intentionally: this is legal situation. */
-        Report("\n\rERROR RxBufAlloc: failed to allocate %d",alloc_len);
+        RX_PRINT_HIGH_PRIORITY("\n\rWARNING RxBufAlloc: failed to allocate %d",alloc_len);
         return NULL;
     }
 

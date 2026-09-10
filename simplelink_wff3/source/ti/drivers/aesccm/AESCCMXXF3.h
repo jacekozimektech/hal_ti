@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2025, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -59,8 +59,8 @@
  *  - The CryptoKey input must have the correct encoding, @ref CryptoKey.h.
  *  - The application can only use one handle per driver.
  *    Concurrent dynamic instances will be supported in the future.
- *  - CCM driver only supports polling return behaviour.
- *    Blocking and callback return behaviours will be supported in the future.
+ *  - CCM driver only supports polling and blocking return behaviour.
+ *    Callback return behaviour will be supported in the future.
  *
  *  # Runtime Parameter Validation #
  *  The driver implementation does not perform runtime checks for most input parameters.
@@ -128,7 +128,8 @@ typedef struct
     uint8_t bufferedAADLength;
     uint8_t macLength;
     uint8_t nonceLength;
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     uint8_t KeyStore_keyingMaterial[AESCommonXXF3_256_KEY_LENGTH_BYTES];
     uint8_t inputFinalBlock[AES_BLOCK_SIZE];
     uint8_t aadFinalBlock[AES_BLOCK_SIZE];
@@ -155,7 +156,8 @@ typedef struct
 #endif
 } AESCCMXXF3_Object;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*!
  *  @brief  Function to set the mac for an AES CCM segmented operation.
  *          This API needs to be called only when the subsequent #AESCCM_addData() operation is processing all of the

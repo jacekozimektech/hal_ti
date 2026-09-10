@@ -204,10 +204,10 @@ int32_t CME_WlanConnect(CMEWlanConnectCommon_t *apCmd, CMEEapWlanConnect_t* apEa
                 buffer. This buffer should be release from CME context.
  Return code:   0 - memory allocation succeeded, -1 failed.
 ---------------------------------------------------------------------------- */
-int16_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile);
+int32_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile);
 
 //same just for EAP type profile
-int16_t CME_AddEapProfile(CMEWlanAddGetEapProfile_t *new_profile);
+int32_t CME_AddEapProfile(CMEWlanAddGetEapProfile_t *new_profile);
 //same but with profile removal
 int16_t CME_RemoveProfile(uint8_t delete_profile_index);
 int16_t CME_DhcpReleaseComplete();
@@ -224,10 +224,26 @@ uint32_t CME_GetStartedRoleBitmap();
 /* ----------------------------------------------------------------------------
  CME_SetStartedRoleBitmap
       This function set the role bit map
- Parameters: bitmask reflecting new roles state  
- Return code:   
+ Parameters: bitmask reflecting new roles state
+ Return code:
 ---------------------------------------------------------------------------- */
 void CME_SetStartedRoleBitmap(uint32_t role_bitmap);
+
+/* ----------------------------------------------------------------------------
+ CME_SetTxPower
+      This function sets the TX power
+ Parameters: params - pointer to WlanTxPowerSet_t containing role and tx_power_dbm
+ Return code:
+---------------------------------------------------------------------------- */
+int32_t CME_SetTxPower(WlanTxPowerSet_t *params);
+
+/* ----------------------------------------------------------------------------
+ CME_GetTxPower
+      This function gets the TX power
+ Parameters: params - pointer to WlanTxPowerGet_t; tx_power_dbm is filled on return
+ Return code: 0 on success, negative error code on failure
+---------------------------------------------------------------------------- */
+int32_t CME_GetTxPower(WlanTxPowerGet_t *params);
 
 /* ----------------------------------------------------------------------------
  CME_SetStartedRoleBitmap
@@ -249,7 +265,7 @@ void CME_SetPowerSaveMode(uint8_t mode);
  Parameters: ap Params - see   RoleUpApCmd_t
  Return code:
 ---------------------------------------------------------------------------- */
-void CME_SetApParams(void *apParams);
+int CME_SetApParams(void *apParams);
 /* ----------------------------------------------------------------------------
  CME_SetStaParams
       Dispatcher command for set sta parameters

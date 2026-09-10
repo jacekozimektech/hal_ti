@@ -82,8 +82,8 @@ void eventEntryThread(void *params);
 #define CMD_CONTAINER_COMMANDS 36 //this can be any number, only rx and tx goes to specific location
 #define CMD_BM_READ_DEVICE_INFO (CMD_UPPER_MAC_COMMANDS)
 
-#define CASTED_MIN_TX_POWER ((int8_t)(MIN_TX_POWER/DBM_TO_TX_POWER_FACTOR))
-#define CASTED_MAX_TX_POWER ((int8_t)(MAX_TX_POWER/DBM_TO_TX_POWER_FACTOR))
+#define CASTED_MIN_TX_POWER ((int8_t)(WLAN_MIN_TX_POWER_DBM))
+#define CASTED_MAX_TX_POWER ((int8_t)(WLAN_MAX_TX_POWER_DBM))
 
 Bool_e gPlt = FALSE;
 CalibratorPowerModes_e gPltState = PLT_OFF;
@@ -449,6 +449,8 @@ Bool_e isCalibratorPowerNeeded(CalibratorAction_e calibratorAction)
         case (CALIBRATOR_ACTION_LINK_ADAPT):
         case (CALIBRATOR_ACTION_MANUAL_CALIBRATION):
         case (CALIBRATOR_ACTION_THERMAL_PROTECTION):
+        case (CALIBRATOR_ACTION_GET_TEMPERATURE):
+        case (CALIBRATOR_ACTION_LINK_ROBUSTNESS_BITMAP):
             needed = FALSE;
             break;
         default:
@@ -547,7 +549,21 @@ int ctrlCmdFw_CalibratorCommand(CalibratorAction_e calibratorAction, void *calib
                                NULL,
                                0);
     }
-        break;    
+        break;
+    case (CALIBRATOR_ACTION_TX_TONE_STOP):
+    {
+        cmd_test_stop_tx_t cmdStopTxTone;
+
+        cmdStopTxTone.cmdTestHeader.cmdTestId = CC33XX_TEST_CMD_TX_TONE_STOP;
+
+        ret = WLSendFW_Command(CMD_TEST,
+                               CMD_TEST,
+                               &cmdStopTxTone,
+                               sizeof(cmd_test_stop_tx_t),
+                               NULL,
+                               0);
+    }
+        break;
     case (CALIBRATOR_ACTION_SET_TX_PARAMS):
     case (CALIBRATOR_ACTION_SET_TB_TX_PARAMS):
     {
@@ -937,6 +953,48 @@ int ctrlCmdFw_CalibratorCommand(CalibratorAction_e calibratorAction, void *calib
         ret = WLSendFW_DebugCommand(THERMAL_PROTECTION_CFG,
                                     &cmdThermalCfg,
                                     sizeof(cmd_debug_thermal_cfg_t),
+                                    NULL,
+                                    0);
+    }
+        break;
+    case (CALIBRATOR_ACTION_GET_TEMPERATURE):
+    {
+        CalibratorGetTemperature_t *temperatureGetParams;
+        cmd_debug_temperature_get_t cmdTemperatureGet;
+
+        if (NULL == calibratorCmdParams)
+        {
+            return -1;
+        }
+        temperatureGetParams = (CalibratorGetTemperature_t *)calibratorCmdParams;
+
+        ret = WLSendFW_DebugInterrogateCommand(TEMPERATURE_GET_INTR,
+                                               &cmdTemperatureGet,
+                                               sizeof(cmd_debug_temperature_get_t),
+                                               &cmdComplete,
+                                               sizeof(Command_e) + \
+                                               sizeof(CommandStatus_e) + \
+                                               sizeof(TemperatureGet_t));
+
+        os_memcpy(temperatureGetParams, cmdComplete.info.param, sizeof(TemperatureGet_t));
+    }
+        break;
+    case (CALIBRATOR_ACTION_LINK_ROBUSTNESS_BITMAP):
+    {
+        CalibratorLinkRobustnessBitmap_t *linkRobustnessBitmapParams;
+        cmd_debug_link_robustness_bitmap_t cmdLinkRobustnessBitmap;
+
+        if (NULL == calibratorCmdParams)
+        {
+            return -1;
+        }
+        linkRobustnessBitmapParams = (CalibratorLinkRobustnessBitmap_t *)calibratorCmdParams;
+
+        os_memcpy(&cmdLinkRobustnessBitmap.linkRobustnessBitmapParams, linkRobustnessBitmapParams, sizeof(LinkRobustnessBitmapCfg_t));
+
+        ret = WLSendFW_DebugCommand(LINK_ROBUSTNESS_BITMAP_CFG,
+                                    &cmdLinkRobustnessBitmap,
+                                    sizeof(cmd_debug_link_robustness_bitmap_t),
                                     NULL,
                                     0);
     }
@@ -1868,7 +1926,7 @@ void ctrlCmdFw_CreateEventThread()
     }
 
 
-     osi_ThreadCreate(&eventThread, "eventThread", EVENT_STACK_SIZE, EVENT_TRANSPORT_THRD_PRIORITY, eventEntryThread, NULL);
+     osi_ThreadCreate(&eventThread, "eventThread", EVENT_STACK_SIZE, EVENT_TRANSPORT_THREAD_PRIORITY, eventEntryThread, NULL);
 
 }
 

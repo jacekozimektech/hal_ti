@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2026, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,6 +46,18 @@
  *  # Implementation Limitations
  *  - Decryption is not supported since the AES HW only supports encryption.
  *  - Only plaintext CryptoKeys are supported by this implementation.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #AESCBC_RETURN_BEHAVIOR_CALLBACK is not supported when
+ *  the input or output buffer is in PSRAM and the data length exceeds the
+ *  bounce buffer chunk size (min of input/output bounce buffer sizes, rounded
+ *  down to an AES block boundary). This applies to one-step operations
+ *  (#AESCBC_oneStepEncrypt / #AESCBC_oneStepDecrypt) as well as segmented
+ *  operations (#AESCBC_addData / #AESCBC_finalize).
+ *
+ *  Returns #AESCBC_STATUS_FEATURE_NOT_SUPPORTED in that case.
+ *  Use #AESCBC_RETURN_BEHAVIOR_BLOCKING or #AESCBC_RETURN_BEHAVIOR_POLLING
+ *  instead. See #HSMXXF3_BounceBuffers.
  *
  *  # Runtime Parameter Validation #
  *  The driver implementation does not perform runtime checks for most input
@@ -98,7 +110,8 @@ typedef struct
     AESCBC_OperationUnion *operation;
     AESCBC_OperationType operationType;
     bool threadSafe;
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     size_t inputLength;
     /*!
      * @brief The status of the HSM Boot up process

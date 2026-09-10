@@ -45,9 +45,10 @@
 #include "common.h"
 #include "config_ssid.h"
 #include "eap_peer/eap.h"
+#include "wlan_if.h"
 
 
-//#define CME_LOG_REPORT
+// #define CME_LOG_REPORT
 #ifdef CME_LOG_REPORT
 #define CME_PRINT_REPORT Report
 #define CME_PRINT_REPORT_ERROR Report
@@ -178,7 +179,7 @@
 #define CME_CONNECTION_SCAN_MEM_SIZE	(CME_SCAN_MAX_CANDIDATES*sizeof(cmeScanCandidateDesc_t))
 
 // Maximal number of profiles.
-#define CME_SCAN_MAX_PROFILES           (5)
+#define CME_SCAN_MAX_PROFILES           (WLAN_MAX_PROFILES)
 
 // Maximum number of supported scan plans for scheduled scan, supported by the driver
 #define CME_SCAN_MAX_SCHED_SCAN_PLANS           (12)
@@ -251,7 +252,7 @@
 #define     CME_THR_IDX                     CME_THR_IDX
 #define     CME_THR_NAME                    M_THREAD_NAME(CME_THR_IDX)
 #define     CME_THR_STACK_SIZE              ((1024 * 7) + 256) //Was 1024*5,was not enough (1024*10)
-#define     CME_THRD_PRIORITY                (8)
+#define     CME_THREAD_PRIORITY                (8)
 
 //import from eap config
 #define MAX_USER_LEN 32

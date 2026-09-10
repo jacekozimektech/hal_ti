@@ -325,6 +325,7 @@ static void wps_registrar_add_authorized_mac(struct wps_registrar *reg,
 // This function was copied from wps_registrar_button_pushed()
 // in order to use supplicant code without having to actually modifying
 // the open source code.
+#ifndef TI_STA_ONLY_BUILD
 int ext_wps_registrar_button_pushed(struct wpa_supplicant *wpa_s,
 				const u8 *p2p_dev_addr)
 {
@@ -332,7 +333,7 @@ int ext_wps_registrar_button_pushed(struct wpa_supplicant *wpa_s,
 		return -1;
 	struct hostapd_data *hapd = wpa_s->ap_iface->bss[0];
     struct wps_registrar *reg = hapd->wps->registrar;
-    
+
 	if (p2p_dev_addr == NULL &&
 	    wps_registrar_pbc_overlap(reg, NULL, NULL)) {
 		wpa_printf(MSG_DEBUG, "WPS: PBC overlap - do not start PBC "
@@ -419,6 +420,7 @@ int ext_wps_registrar_add_pin(struct wpa_supplicant *wpa_s, const u8 *addr,
 
 	return 0;
 }
+#endif
 
 int32 ext_p2p_process_prov_disc_req(WlanProvDiscResp_t* pProvDiscResp)
 {
@@ -1637,7 +1639,7 @@ int32_t extWpsScan(uint8_t is_pin)
     wpa_supplicant_cancel_sched_scan(wpa_s);
     wpa_supplicant_cancel_scan(wpa_s);
     
-    // Set the supplicant scan result handler to "scan only" to prevent it 
+    // Set the supplicant scan result handler to "scan only" to prevent it
     // from trying to connect to the configured WPS proile
     wpa_s->scan_res_handler = scan_only_handler;
     wpa_s->scan_req = MANUAL_SCAN_REQ;

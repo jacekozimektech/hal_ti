@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, Texas Instruments Incorporated
+ * Copyright (c) 2025-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -37,6 +37,16 @@
  *
  *  This file should only be included in the board file to fill the
  *  EDDSA_config struct.
+ *
+ *  # CC35XX: Callback Mode Restrictions with External Memory
+ *  On CC35XX devices, #EDDSA_RETURN_BEHAVIOR_CALLBACK is not supported when
+ *  the EDDSA driver object is placed in external memory (PSRAM) for the
+ *  following operations:
+ *  - #EDDSA_generatePublicKey()
+ *  - #EDDSA_sign()
+ *  Returns #EDDSA_STATUS_FEATURE_NOT_SUPPORTED in these cases.
+ *  Use #EDDSA_RETURN_BEHAVIOR_BLOCKING or #EDDSA_RETURN_BEHAVIOR_POLLING
+ *  instead. See #HSMXXF3_BounceBuffers.
  *
  *  # Supported Curve Types #
  *

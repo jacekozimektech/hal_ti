@@ -1336,7 +1336,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
                 if (TRUE == channelCapability.channelValidityActive)
                 {
                     activeScanChanInfo[numOfActiveChannels].channel = localChannel[index];
-                    activeScanChanInfo[numOfActiveChannels].txPowerLevelDbm = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+                    activeScanChanInfo[numOfActiveChannels].txPowerLevelDbm = channelCapability.uMaxTxPowerDomain;
                     activeScanChanInfo[numOfActiveChannels].channelFlags = 0;
                     numOfActiveChannels++;
                     pNumOfActive[RADIO_BAND_2_4GHZ]++;
@@ -1345,7 +1345,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
                 else if (TRUE == channelCapability.channelValidityPassive)
                 {
                     pChannelList[passiveIdx].channel = localChannel[index];
-                    pChannelList[passiveIdx].txPowerLevelDbm = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+                    pChannelList[passiveIdx].txPowerLevelDbm = channelCapability.uMaxTxPowerDomain;
                     pChannelList[passiveIdx].channelFlags = 0;
                     passiveIdx++;
                     pNumOfPassive[RADIO_BAND_2_4GHZ]++;
@@ -1411,7 +1411,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
                 {
                     pChannelList[passiveIdx].channelFlags = 0;
                     pChannelList[passiveIdx].channel = localChannel[index];
-                    pChannelList[passiveIdx].txPowerLevelDbm = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+                    pChannelList[passiveIdx].txPowerLevelDbm = channelCapability.uMaxTxPowerDomain;
                     passiveIdx++;
                     pNumOfPassive[RADIO_BAND_5GHZ]++;
                 }
@@ -1424,7 +1424,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
                 {
                     pChannelList[passiveIdx].channelFlags = TIW_REG_DOMAIN_DFS;
                     pChannelList[passiveIdx].channel = localChannel[index];
-                    pChannelList[passiveIdx].txPowerLevelDbm = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+                    pChannelList[passiveIdx].txPowerLevelDbm = channelCapability.uMaxTxPowerDomain;
                     passiveIdx++;
                     pNumOfDfs[0]++;
 
@@ -1437,7 +1437,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
                 {
                     activeScanChanInfo[numOfActiveChannels].channelFlags = 0;
                     activeScanChanInfo[numOfActiveChannels].channel = localChannel[index];
-                    activeScanChanInfo[numOfActiveChannels].txPowerLevelDbm = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+                    activeScanChanInfo[numOfActiveChannels].txPowerLevelDbm = channelCapability.uMaxTxPowerDomain;
                     numOfActiveChannels++;
                     pNumOfActive[RADIO_BAND_5GHZ]++;
                 }

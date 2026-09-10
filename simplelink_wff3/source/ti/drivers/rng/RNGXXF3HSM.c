@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,6 +43,10 @@
 #include <ti/drivers/dpl/HwiP.h>
 #include <ti/devices/DeviceFamily.h>
 #include DeviceFamily_constructPath(inc/hw_memmap.h)
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    #include <ti/drivers/xmem/XMEMWFF3.h>
+#endif
 
 extern const RNGXXF3HSM_HWAttrs RNGXXF3HSM_hwAttrs;
 extern uint8_t RNG_instancePool[];
@@ -180,6 +184,63 @@ static int_fast16_t RNGXXF3HSM_generateEntropyInternal(RNG_Handle handle,
     int_fast16_t status    = RNG_STATUS_ERROR;
     int_fast16_t hsmRetval = HSMXXF3_STATUS_ERROR;
     int32_t tokenResult    = 0U;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    if (XMEMWFF3_isAddrExternal(outputBuffer) && (RNGXXF3HSM_returnBehavior == RNG_RETURN_BEHAVIOR_CALLBACK))
+    {
+        /* Callback mode is not supported by the HSM driver when the output
+         * buffer is in external memory.
+         */
+        return RNG_STATUS_UNSUPPORTED;
+    }
+
+    /* When the output buffer is in PSRAM and exceeds the output bounce slot,
+     * generate entropy in chunks. The HSM lock is already held by the caller
+     * so looping submit+wait here is safe - no re-acquisition needed.
+     */
+    if (XMEMWFF3_isAddrExternal(outputBuffer) && (bytesToGenerate > HSMXXF3_outputBounce.size))
+    {
+        /* CALLBACK mode cannot chunk: each submit would fire its own callback. */
+        if (RNGXXF3HSM_returnBehavior == RNG_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return RNG_STATUS_UNSUPPORTED;
+        }
+
+        uint8_t *chunk        = (uint8_t *)outputBuffer;
+        size_t remainingBytes = bytesToGenerate;
+
+        while (remainingBytes > 0U)
+        {
+            size_t chunkSize = (remainingBytes > HSMXXF3_outputBounce.size) ? HSMXXF3_outputBounce.size
+                                                                            : remainingBytes;
+
+            HSMXXF3_constructRNGGetRandomNumberPhysicalToken((uintptr_t)chunk, chunkSize);
+
+            hsmRetval = HSMXXF3_submitToken((HSMXXF3_ReturnBehavior)RNGXXF3HSM_returnBehavior, NULL, (uintptr_t)handle);
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS)
+            {
+                return RNG_STATUS_ERROR;
+            }
+
+            hsmRetval = HSMXXF3_waitForResult();
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS)
+            {
+                return RNG_STATUS_ERROR;
+            }
+
+            tokenResult = HSMXXF3_getResultCode();
+            if ((tokenResult & HSMXXF3_RETVAL_MASK) != EIP130TOKEN_RESULT_SUCCESS)
+            {
+                return RNG_STATUS_ERROR;
+            }
+
+            chunk += chunkSize;
+            remainingBytes -= chunkSize;
+        }
+
+        return RNG_STATUS_SUCCESS;
+    }
+#endif
 
     /* Populates the HSMXXF3 commandToken as a RNG get DRBG random number operation */
     HSMXXF3_constructRNGGetRandomNumberPhysicalToken(outputBuffer, bytesToGenerate);

@@ -213,6 +213,7 @@ TTxCtrlBlk *txCtrlBlk_Alloc (uint8_t isMgmt)
 
     pCurrentEntry->tTxPktParams.uFlags = 0;
     pCurrentEntry->tTxPktParams.uHeadroomSize = 0;
+    pCurrentEntry->tTxPktParams.isNullDataFrame = 0;
     pCurrentEntry->tTxPktParams.fCb = NULL;
     pCurrentEntry->tTxPktParams.pInputDesc = NULL;
     os_memset(&pCurrentEntry->tTxDescriptor, 0, sizeof(TxIfDescriptor_t));

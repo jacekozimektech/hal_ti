@@ -46,6 +46,8 @@
 //
 //***********************************************************************************************************************/
 
+#ifndef TI_STA_ONLY_BUILD
+
 #include <stdio.h>
 #include "cme_internal_api.h"
 #include "cme_dispatcher_api.h"
@@ -1500,3 +1502,5 @@ int32_t CME_DelList(uint8_t listType, BOOLEAN UpdateFlash)
 
     return status;
 }
+
+#endif

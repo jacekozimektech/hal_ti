@@ -143,8 +143,9 @@ extern volatile uint8_t gFwCrashOccurred;
 //
 // other macros
 //
-#define CME_IS_SEC_TYPE_SAE(SecType)     ((SecType) == CME_SEC_TYPE_WPA3 || (SecType) == CME_SEC_TYPE_WPA2_WPA3)
-#define CME_IS_SEC_TYPE_TRANSITION_MODE(SecType)     (SecType == CME_SEC_TYPE_WPA2_WPA3)
+#define CME_IS_SEC_TYPE_SAE(SecType)     ((SecType) == CME_SEC_TYPE_WPA3 || (SecType) == CME_SEC_TYPE_WPA2_WPA3 || \
+                                          (SecType) == CME_SEC_TYPE_WPA3_FT || (SecType) == CME_SEC_TYPE_WPA2_WPA3_FT)
+#define CME_IS_SEC_TYPE_TRANSITION_MODE(SecType)     ((SecType) == CME_SEC_TYPE_WPA2_WPA3 || (SecType) == CME_SEC_TYPE_WPA2_WPA3_FT)
 
 #define CME_IS_ENT_KEY_MGMT_SUITE_B_TYPE(keyMgmt)  ((keyMgmt) & (WPA_KEY_MGMT_IEEE8021X_SUITE_B | WPA_KEY_MGMT_IEEE8021X_SUITE_B_192))
 
@@ -159,7 +160,14 @@ typedef struct {
 
 // Holds copies of supplicant connection parameters for potential future use during reassociation
 typedef struct {
-    u8              valid;
+    //--------------------------------
+    //Params for internal use
+    u8              valid; 
+    u8              int_curr_ssid[WLAN_SSID_MAX_LENGTH]; 
+    size_t          int_curr_ssid_len;
+    int             int_key_mgmt;
+
+    //--------------------------------
     // Parameters from wpa_s->sme (struct sme)
     u8              prev_bssid[ETH_ALEN];
     int             prev_bssid_set;
@@ -316,7 +324,7 @@ _cmeFastConnectionCB_t gCmeFastConnectionCB_ull ;
 
 uint8_t gEnableFastConnectionStoreToFlash = 0; //TODO: Add support for this by user configuration
 
-#define CME_FAST_CONNECTION_TIMEOUT_MILI_SEC  (3000)
+#define CME_FAST_CONNECTION_TIMEOUT_MILI_SEC  (4000)
 
 void wlan_calculate_pmk(int ssid_len,
                 int8_t *ssid,
@@ -365,6 +373,7 @@ static void addProfileEap2DB(uint16_t    SecType,
                              const uint8_t*    pEap_private_key,
                              uint32_t    eap_private_key_len,
                              uint32_t TLSKeyLength,
+                             uint8_t  FastTransition,
                              cmeProfileInfo_t * inputProfile);
 
 static struct wpa_ssid * addProfile2Supplicant(const _cme_minimized_wpa_ssid_t *apInputApSsid);
@@ -1508,7 +1517,6 @@ static Bool_e shouldUseFastConnect(_cme_minimized_wpa_ssid_t **apSsid, cmeScanCa
 
             GTRACE(GRP_CME, "shouldUseFastConnect: profiles connection requested, gCmeLastWlanProfileIdx=%d, match=%d",gCmeLastWlanProfileIdx,MatchResult);
 
-
         }
         //look for a match between the requested wlan_connect ssid/bssid to the existing fast-connect
        else if (apEapCmd!=NULL)
@@ -2401,12 +2409,6 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
 
 	if (ROLE_IS_TYPE_STA_BASED(role))
 	{
-        isReassociate = CMEisSameConnectParams(apCmd, FALSE);
-        if (isReassociate && cmeAreReassociationParamsValid())
-        {
-            cmeReassociationParamsRestore();
-        }
-
         if (isextWPS())
         {
             if ((apCmd->SecType == CME_SEC_TYPE_WPS_PBC) || (apCmd->SecType == CME_SEC_TYPE_WPS_PIN))
@@ -2601,6 +2603,7 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
                 cmd.PasswordLen = apEapCmd->EapCommonConnect.PasswordLen;
                 cmd.SecType = apEapCmd->EapCommonConnect.SecType;
                 cmd.SsidLen = apEapCmd->EapCommonConnect.SsidLen;
+                cmd.FastTransition = apEapCmd->EapCommonConnect.FastTransition;
                 // ad-hoc connection has non priority, set here from CME instead
                 cmd.Priority = 1;
                 IRQ_UtilCopyMacAddress((uint8_t *)apEapCmd->EapCommonConnect.Bssid, (uint8_t *)&cmd.Bssid);
@@ -2608,7 +2611,7 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
                 // As in cc3100, set WepKeyId to 0 - TODO - should be available in connect command
                 cmd.WepKeyId = 0;
 
-                addAdHocProfile2DB(&cmd, aKeyMgmt, EAP_SSID_STRING(apEapCmd), EAP_PASSWORD_STRING(apEapCmd), P2P_NONE,apEapCmd);
+                addAdHocProfile2DB(&cmd, aKeyMgmt, EAP_SSID_STRING(apEapCmd), EAP_PASSWORD_STRING(apEapCmd), P2P_NONE, apEapCmd);
             }
 	        else if (apCmd != NULL)
 	        {
@@ -2668,6 +2671,7 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
 	    }
 	}
 
+#ifndef TI_STA_ONLY_BUILD
 	else if (ROLE_IS_TYPE_DEVICE(role))
 	{
 
@@ -2679,6 +2683,7 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
             return;
         }
 	}
+#endif
 
 	// Everything done, free the connection info memory
 
@@ -3307,7 +3312,23 @@ int32_t addProfileIdToSupplicant(cmeScanCandidateDesc_t *apCandidate)
     }
     GTRACE(GRP_CME, "pProfile-psk_set %d",pProfile->profile.psk_set);
 
-    // Profile is valid, add it to supplicant
+        if ( cmeAreReassociationParamsValid(&pProfile->profile))
+        {
+            // Profile is valid, add it to supplicant
+            //restore reassociation params if:
+            //1. valid AND
+            //2. same ssid ()
+            //3 check security
+            //We restore the reassiciation params before adding profile to supplicant
+            cmeReassociationParamsRestore();
+        }
+        else
+        {
+            //clear - not same network
+            cmeReassociationParamsClear();
+        }
+
+
     pSupplicantSsid = addProfile2Supplicant(&pProfile->profile);
     pProfile->profile.id = pSupplicantSsid->id;
     //mark last connected profile index attempt
@@ -3678,6 +3699,7 @@ static void addAdHocProfile2DB(CMEWlanAddGetProfile_t  *apCmd, uint32_t aKeyMgmt
                 apEapCmd->pEap_private_key,
                 apEapCmd->eap_private_key_len,
                 apEapCmd->TLSKeyLength,
+                apEapCmd->EapCommonConnect.FastTransition,
                 &gAdHocProfile_ull);
     }
     else
@@ -3923,6 +3945,7 @@ static void addProfileEap2DB(uint16_t    SecType,
                              const uint8_t*    pEap_private_key,
                              uint32_t    eap_private_key_len,
                              uint32_t    TLSKeyLength,
+                             uint8_t     FastTransition,
                              cmeProfileInfo_t * inputProfile)
 {
     int32_t i;
@@ -4063,6 +4086,11 @@ static void addProfileEap2DB(uint16_t    SecType,
     inputProfile->profile.eap.client_cert_len = eap_client_cert_len;
     inputProfile->profile.eap.private_key_len = eap_private_key_len;
 
+    if (FastTransition)
+    {
+        inputProfile->profile.key_mgmt |= WPA_KEY_MGMT_FT_IEEE8021X; // | WPA_KEY_MGMT_FT_IEEE8021X_SHA384;
+        inputProfile->profile.auth_alg |= WPA_AUTH_ALG_FT;
+    }
 
 
     switch (eap_phase1_val)
@@ -4781,15 +4809,17 @@ int cmeFastConnectionDeAuthHandler(struct wpa_supplicant *wpa_s)
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
 
     _cme_minimized_wpa_ssid_t *pSsid = NULL;
+    cmeScanCandidateDesc_t *pFastCandidate = NULL;
 
     GTRACE(GRP_CME,"cmeFastConnectionDeAuthHandler: gCmeFastConnectionCB_ull.isFastConnectSecondChance=%d ",(uint32_t)gCmeFastConnectionCB_ull.cmeFastConnectStatusLabel.isFastConnectSecondChance);
     CME_PRINT_PROFILE_REPORT("\n\rcmeFastConnectionDeAuthHandler: gCmeFastConnectionCB_ull.isFastConnectSecondChance=%d ",(uint32_t)gCmeFastConnectionCB_ull.cmeFastConnectStatusLabel.isFastConnectSecondChance);
     // if this is a quick deauth, we give it a second chance
-    if ((gCmeFastConnectionCB_ull.cmeFastConnectStatusLabel.isFastConnectSecondChance == 1) && shouldUseFastConnect(&pSsid,NULL,NULL,NULL,0))
+    if ((gCmeFastConnectionCB_ull.cmeFastConnectStatusLabel.isFastConnectSecondChance == 1) && shouldUseFastConnect(&pSsid,&pFastCandidate,NULL,NULL,0))
     {//Second chance fast connect
         ASSERT_GENERAL(pSsid!=NULL);
         cmeFastConnectionTimerReleaseResources();
-        cmeFastConnectAttempt(wpa_s, pSsid,0);
+        cmePushFast2ScanResult(pFastCandidate);
+        cmeFastConnectAttempt(wpa_s, pSsid, 0);
         return 1; //so that profile manager wont be triggered yet
     }
     else
@@ -5213,8 +5243,7 @@ void convertAsciiString2Hex(int8_t *dest, int8_t *pString, uint32_t aLength)
         }
     }
 
-    tempString[aLength/2] = 0;
-    strcpy((char *)dest, tempString);
+    os_memcpy(dest, tempString, aLength/2);
 }
 
 
@@ -5426,8 +5455,10 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
         }
         break;
 
+        case CME_SEC_TYPE_WPA2_FT:
         case CME_SEC_TYPE_WPA_WPA2:
         {
+            uint8_t ft = (apCmd->SecType == CME_SEC_TYPE_WPA2_FT) || apCmd->FastTransition;
             uint32_t passPhraseLen = apCmd->PasswordLen;
 
             HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -5442,6 +5473,12 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
             apSsid->auth_alg = WPA_AUTH_ALG_OPEN;
             apSsid->psk_set = 0;
             //apSsid->ieee80211w = MGMT_FRAME_PROTECTION_OPTIONAL;
+
+            if (ft)
+            {
+                apSsid->key_mgmt |= WPA_KEY_MGMT_FT_PSK;
+                apSsid->auth_alg |= WPA_AUTH_ALG_FT;
+            }
 
             if (WPA_HEX_PASSPHRASE_LENGTH == passPhraseLen)
             {
@@ -5477,8 +5514,10 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
 
         }
         break;
+        case CME_SEC_TYPE_WPA2_PLUS_FT:
         case CME_SEC_TYPE_WPA2_PLUS:
         {
+            uint8_t ft = (apCmd->SecType == CME_SEC_TYPE_WPA2_PLUS_FT) || apCmd->FastTransition;
             uint32_t passPhraseLen = apCmd->PasswordLen;
 
             HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -5492,6 +5531,11 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
             apSsid->proto = DEFAULT_PROTO;
             apSsid->auth_alg = WPA_AUTH_ALG_OPEN;
 
+            if (ft)
+            {
+                apSsid->key_mgmt |= WPA_KEY_MGMT_FT_PSK;
+                apSsid->auth_alg |= WPA_AUTH_ALG_FT;
+            }
 
             if (WPA_HEX_PASSPHRASE_LENGTH == passPhraseLen)
             {
@@ -5530,8 +5574,10 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
         break;
 
 #ifdef CONFIG_SAE
+        case CME_SEC_TYPE_WPA3_FT:
         case CME_SEC_TYPE_WPA3:
         {
+            uint8_t ft = (apCmd->SecType == CME_SEC_TYPE_WPA3_FT) || apCmd->FastTransition;
             uint32_t passPhraseLen = apCmd->PasswordLen;
 
             HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -5546,6 +5592,11 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
 
             apSsid->ieee80211w          = MGMT_FRAME_PROTECTION_REQUIRED;
 
+            if (ft)
+            {
+                apSsid->key_mgmt |= WPA_KEY_MGMT_FT_SAE;
+                apSsid->auth_alg |= WPA_AUTH_ALG_FT;
+            }
 
             apSsid->passphrase = os_malloc(passPhraseLen+1);
             if (apSsid->passphrase)
@@ -5562,8 +5613,10 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
         }
         break;
 
+        case CME_SEC_TYPE_WPA2_WPA3_FT:
         case CME_SEC_TYPE_WPA2_WPA3:
         {
+            uint8_t ft = (apCmd->SecType == CME_SEC_TYPE_WPA2_WPA3_FT) || apCmd->FastTransition;
             uint32_t passPhraseLen = apCmd->PasswordLen;
 
             HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -5579,6 +5632,12 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
             apSsid->psk_set = 0;
             apSsid->ieee80211w = MGMT_FRAME_PROTECTION_OPTIONAL;
             //apSsid->group_mgmt_cipher   = WPA_CIPHER_AES_128_CMAC;
+
+            if (ft)
+            {
+                apSsid->key_mgmt |= WPA_KEY_MGMT_FT_PSK | WPA_KEY_MGMT_FT_SAE;
+                apSsid->auth_alg |= WPA_AUTH_ALG_FT;
+            }
 
             if (WPA_HEX_PASSPHRASE_LENGTH == passPhraseLen)
             {
@@ -5598,7 +5657,6 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
 
                     apSsid->psk_set = 1;
                 }
-                
                 
                 // Set passphrase for WPA3
                 apSsid->passphrase = os_malloc(passPhraseLen+1);
@@ -5671,21 +5729,6 @@ static int32_t setSecurityParams(CMEWlanAddGetProfile_t *apCmd,
 
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
 
-    switch(apCmd->SecType)
-    {
-        case CME_SEC_TYPE_WPA_WPA2:
-        case CME_SEC_TYPE_WPA2_PLUS:
-        case CME_SEC_TYPE_WPA2_WPA3:
-        case CME_SEC_TYPE_WPA3:
-        {
-            if (apCmd->FastTransition)
-            {
-                apSsid->auth_alg |= WPA_AUTH_ALG_FT;
-                apSsid->key_mgmt |= WPA_KEY_MGMT_FT_PSK;
-            }
-        }
-        break;
-    }
     CME_PRINT_REPORT("\n\r[ti_drv] Set security for %.*s: Alg=%x, kMgmt=%x \n",
         apSsid->ssid_len, apSsid->ssid, apSsid->auth_alg, apSsid->key_mgmt); 
     return rc;
@@ -8290,21 +8333,22 @@ BOOLEAN cmeCompareLastAdHocConnParams(CMEWlanConnectCommon_t *pCmdbuffer)
 
     return IsDifferent;
 }
-Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidName)
+Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidName, Bool_e checkBssid)
 {
     struct wpa_supplicant *wpa_s;
     int temp = 0;
     Bool_e ret = FALSE;
     drv_getStaIface(gpSupplicantGlobals, &wpa_s);
-    if ( (pCmdbuffer->SecType != WLAN_SEC_TYPE_WPS_PBC) && (pCmdbuffer->SecType != WLAN_SEC_TYPE_WPS_PIN) 
+    if ( (pCmdbuffer->SecType != WLAN_SEC_TYPE_WPS_PBC) && (pCmdbuffer->SecType != WLAN_SEC_TYPE_WPS_PIN)
             && (pCmdbuffer->SecType != WLAN_SEC_TYPE_P2P_PBC) && (pCmdbuffer->SecType != WLAN_SEC_TYPE_P2P_PIN_KEYPAD)
             && (pCmdbuffer->SecType != WLAN_SEC_TYPE_P2P_PIN_DISPLAY) && (pCmdbuffer->SecType != WLAN_SEC_TYPE_P2P_PIN_AUTO) )
     {
         GTRACE(GRP_CME, "CME: Now compare ssid/bssid...");
-        if ((pCmdbuffer->SsidLen > 0) 
+        if ((pCmdbuffer->SsidLen > 0)
             && (gAdHocProfile_ull.profile.ssid_len))
         {
-            if ((!IRQ_UtilIsZeroMacAddress(gAdHocProfile_ull.profile.bssid))
+            if ((checkBssid == TRUE)
+                && (!IRQ_UtilIsZeroMacAddress(gAdHocProfile_ull.profile.bssid))
                 && ( pCmdbuffer->Bssid[0] ||
                     pCmdbuffer->Bssid[1] ||
                     pCmdbuffer->Bssid[2] ||
@@ -8313,6 +8357,7 @@ Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidNa
                     pCmdbuffer->Bssid[5] ))
             {
                 GTRACE(GRP_CME, "CME: bssid params exist! Now compare if are the same");
+                Report("\n\rCME: bssid params exist! Now compare if are the same");
                 temp = os_memcmp(pCmdbuffer->Bssid, gAdHocProfile_ull.profile.bssid, MAC_ADDR_LEN);
             }
             if (pCmdbuffer->SsidLen == gAdHocProfile_ull.profile.ssid_len)
@@ -8320,6 +8365,7 @@ Bool_e CMEisSameConnectParams(CMEWlanConnectCommon_t *pCmdbuffer, int8_t* ssidNa
                 temp |= os_memcmp(ssidName, gAdHocProfile_ull.profile.ssid, pCmdbuffer->SsidLen);
                 GTRACE(GRP_CME, "CME: same ssid len, ssid compare = %d, gSectype = %d, cmdSectype=%d key_mgmt=0x%x",
                     temp,  gAdHocProfile_ull.profile.secType, pCmdbuffer->SecType, gAdHocProfile_ull.profile.key_mgmt);
+                    
                 if ((0 == temp)
                     && (gAdHocProfile_ull.profile.secType == pCmdbuffer->SecType))
                 {
@@ -8780,6 +8826,7 @@ void cmeReassociationParamsStore()
 {
     struct wpa_supplicant *wpa_s;
     drv_getStaIface(gpSupplicantGlobals, &wpa_s);
+    CME_PRINT_REPORT("\r\ncmeReassociationParamsStore - store activated");
 
     if ((wpa_s == NULL) || (wpa_s->wpa == NULL))
     {
@@ -8789,7 +8836,12 @@ void cmeReassociationParamsStore()
 
     os_memset(&g_reassociation_params, 0, sizeof(g_reassociation_params));
 
+
     g_reassociation_params.valid = TRUE;
+    //save current ssid & keymgmt
+    os_memcpy(g_reassociation_params.int_curr_ssid, wpa_s->current_ssid->ssid, wpa_s->current_ssid->ssid_len);
+    g_reassociation_params.int_curr_ssid_len = wpa_s->current_ssid->ssid_len;
+    g_reassociation_params.int_key_mgmt = wpa_s->current_ssid->key_mgmt;
 
     os_memcpy(g_reassociation_params.prev_bssid, wpa_s->sme.prev_bssid, ETH_ALEN);
     g_reassociation_params.prev_bssid_set = wpa_s->sme.prev_bssid_set;
@@ -8866,18 +8918,30 @@ void cmeReassociationParamsRestore()
     os_memcpy(wpa_s->wpa->pmk_r1, g_reassociation_params.pmk_r1, PMK_LEN_MAX);
     wpa_s->wpa->pmk_r1_len = g_reassociation_params.pmk_r1_len;
 #endif /* CONFIG_IEEE80211R */
+CME_CON_PRINT("\r\ncmeReassociationParamsRestore - restore activated");
 }
 
 void cmeReassociationParamsClear()
 {
+    CME_CON_PRINT("cmeReassociationParamsClear - clearing g_reassociation_params");
     os_memset(&g_reassociation_params, 0, sizeof(g_reassociation_params));
 }
 
-Bool_e cmeAreReassociationParamsValid()
+Bool_e cmeAreReassociationParamsValid(const _cme_minimized_wpa_ssid_t *apInputApSsid)
 {
-    return g_reassociation_params.valid;
+    if(g_reassociation_params.valid)
+    {
+        if (!(apInputApSsid->key_mgmt & g_reassociation_params.int_key_mgmt))
+            return FALSE;
+        if (apInputApSsid->ssid_len != g_reassociation_params.int_curr_ssid_len)
+            return FALSE;
+        if (os_memcmp(apInputApSsid->ssid, g_reassociation_params.int_curr_ssid,
+                      apInputApSsid->ssid_len) != 0)
+            return FALSE;
+        return TRUE;
+    }
+    return FALSE;
 }
-
 
 //==================================================================
 //  P2P Related:
@@ -8894,10 +8958,11 @@ Bool_e CME_IsP2PConnectionRequired(uint8_t secType)
 }
 
 
+#ifndef TI_STA_ONLY_BUILD
 void cmeHandleP2pConnection(CMEWlanConnectCommon_t *apCmd, uint32_t aKeyMgmt)
 {
     ti_driver_ifData_t *pDevDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_P2PDEV));
-    struct wpa_supplicant *wpas = NULL; 
+    struct wpa_supplicant *wpas = NULL;
     struct p2p_data *p2p = NULL; //gets P2P State
     uint8_t p2pState = 0xF; //Invalid state
 
@@ -8928,11 +8993,11 @@ void cmeHandleP2pConnection(CMEWlanConnectCommon_t *apCmd, uint32_t aKeyMgmt)
             break;
         case P2P_CONNECT:
         case P2P_CONNECT_LISTEN:
-            GTRACE(GRP_CME, "CME: P2P GO Negotiation is already started!"); 
+            GTRACE(GRP_CME, "CME: P2P GO Negotiation is already started!");
             CME_PRINT_REPORT_ERROR("\r\nCME: ERROR! P2P GO Negotiation is already started!");
             cmeP2pCancel();
             return;
-            break; 
+            break;
     }
 
 
@@ -8996,9 +9061,11 @@ void cmeHandleP2pConnection(CMEWlanConnectCommon_t *apCmd, uint32_t aKeyMgmt)
         pDevDrv->p2pPeerCandidateIsFound = 0;
         // now we finally call p2p_find()
     cmeStartP2pFind(wpas, NULL, CME_P2P_CONNECTION_FIND_TIMEOUT, FALSE);
-  
-}
 
+}
+#endif // TI_STA_ONLY_BUILD
+
+#ifndef TI_STA_ONLY_BUILD
 /* ----------------------------------------------------------------------------
  cmeP2pConnect
 
@@ -9025,6 +9092,12 @@ void cmeP2pConnect(void *apPriv)
     int join = 0;
 	int auth = 0;
 	int go_intent = -1; //-1 to use default
+    if (cme_is_sta_role_like_activated())
+    {
+        go_intent = 15; // STA+P2P_CL is unsupported; maximize our GO intent to avoid client outcome
+        GTRACE(GRP_CME, "CME: cmeP2pConnect: STA role active - forcing go_intent=15");
+        CME_PRINT_REPORT("\r\nCME: cmeP2pConnect: STA role active - go_intent forced to 15");
+    }
 	int freq = 0; // frequency for the Group or 0 for auto-selection
 	int pd = 0; // Whether to send Provision Discovery prior to GO Negotiation as an
                 // interoperability workaround when initiating group formation
@@ -9087,26 +9160,30 @@ void cmeP2pConnect(void *apPriv)
 				   NULL, 0, allow_6ghz);
 
     CME_SET_WPS_AD_HOC_CONNECTION(); //Mark the ad hoc is WPS so the next scan will be for WPS networks
-    GTRACE(GRP_CME, "CME: after call P2P wpas_p2p_connect: CME_SET_WPS_AD_HOC_CONNECTION"); 
+    GTRACE(GRP_CME, "CME: after call P2P wpas_p2p_connect: CME_SET_WPS_AD_HOC_CONNECTION");
 }
+#endif // TI_STA_ONLY_BUILD
 
+#ifndef TI_STA_ONLY_BUILD
 void cmeP2pClearAll()
 {
     struct wpa_supplicant *wpa_s = NULL;
-    ti_driver_ifData_t *pDrv = NULL; 
-
-    wpa_s = drv_getP2pDeviceSupplicant();
-
-    if (wpa_s != NULL)
-    {
-        pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
-        pDrv->p2pConnectionStarted = FALSE;
-        memset(pDrv->p2pPeerAddr, 0, 6);
-        pDrv->p2pPeerCandidateIsFound = 0;
-        pDrv->p2pCapabGroupOwnerBit = 0;
-    }
+    ti_driver_ifData_t *pDrv = NULL;
 
     gCmeP2pInfo.p2pConnectPending = FALSE;
+
+    wpa_s = drv_getP2pDeviceSupplicant();
+    if (wpa_s == NULL)
+    {
+        CME_PRINT_REPORT("\n\r Note: No p2p device role is active");
+        return;
+    }
+
+    pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
+    pDrv->p2pConnectionStarted = FALSE;
+    memset(pDrv->p2pPeerAddr, 0, 6);
+    pDrv->p2pPeerCandidateIsFound = 0;
+    pDrv->p2pCapabGroupOwnerBit = 0;
 
 }
 void cmeP2pGroupRemove()
@@ -9181,7 +9258,7 @@ void cmeP2pGroupRemove()
         ret = wpas_p2p_group_remove(wpa_s, wpa_s->ifname);
         if (ret < 0)
         {
-            CME_PRINT_REPORT("\r\n [role:%d] Group Removed Command returned -1. \r\nGroup was not formed but group command arrive. \r\nLet's notify Host\n",
+            CME_PRINT_REPORT("\r\n [role:%d] Group Removed Command returned -1. \r\nGroup was not formed but group command arrive.\r\n",
                        pDrv->roleType);
 
             if (pDrv != NULL)
@@ -9201,21 +9278,23 @@ void cmeP2pGroupRemove()
     }
 
 }
+#endif // TI_STA_ONLY_BUILD
 
+#ifndef TI_STA_ONLY_BUILD
 void cmeP2pListen()
 {
     uint32_t roleId;
     struct wpa_supplicant *wpa_s = NULL;
-    ti_driver_ifData_t *pDrv = NULL; 
+    ti_driver_ifData_t *pDrv = NULL;
     ti_driver_ifData_t *pDevDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_P2PDEV));
-    struct wpa_supplicant *wpas = NULL; 
+    struct wpa_supplicant *wpas = NULL;
     wpas = pDevDrv->wpa_s;
     wpas_p2p_listen(wpas, 0);
 }
 void cmeP2pCancel()
 {
     ti_driver_ifData_t *pDevDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_P2PDEV));
-    struct wpa_supplicant *wpas = NULL; 
+    struct wpa_supplicant *wpas = NULL;
     int retVal;
 
     wpas = pDevDrv->wpa_s;
@@ -9225,7 +9304,45 @@ void cmeP2pCancel()
         CME_PRINT_REPORT_ERROR("\r\n CME WARN: P2P cancel return %d - No ongoing group formation", retVal);
     }
 }
+#endif /* TI_STA_ONLY_BUILD */
 
+#ifndef TI_STA_ONLY_BUILD
+void cmeP2pGroupAdd(const char *ssidPostfix, int32_t freq)
+{
+    int ret;
+    int persistent = 0; /* Not supported - optional in cert.*/
+    size_t postfixLen;
+    struct wpa_supplicant *wpa_s = drv_getP2pDeviceSupplicant();
+
+    if (wpa_s == NULL)
+    {
+        CME_PRINT_REPORT_ERROR("\r\n CME: cmeP2pGroupAdd - no P2P device wpa_s");
+
+        return;
+    }
+
+    GTRACE(GRP_CME, "CME: cmeP2pGroupAdd ssidPostfix=%s freq=%d", ssidPostfix, freq);
+    CME_PRINT_REPORT("\r\n CME: cmeP2pGroupAdd ssidPostfix=%s freq=%d", ssidPostfix, freq);
+
+    /* Set or clear the SSID postfix in the P2P module before forming the group */
+    if ((ssidPostfix != NULL) && (ssidPostfix[0] != '\0'))
+    {
+        postfixLen = strlen(ssidPostfix);
+        p2p_set_ssid_postfix(wpa_s->global->p2p, (const u8 *)ssidPostfix, postfixLen);
+    }
+    else
+    {
+        p2p_set_ssid_postfix(wpa_s->global->p2p, NULL, 0);
+    }
+
+    ret = wpas_p2p_group_add(wpa_s, persistent, freq, 0, 0, 0, 0, 0, 0, false);
+
+    if (ret < 0)
+    {
+        CME_PRINT_REPORT_ERROR("\r\n CME: cmeP2pGroupAdd failed ret=%d", ret);
+    }
+}
+#endif
 
 int32_t  extSetSecurityParams(CMEWlanAddGetProfile_t *apCmd,
                                 _cme_minimized_wpa_ssid_t       *apSsid,

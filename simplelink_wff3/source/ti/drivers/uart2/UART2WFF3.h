@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Texas Instruments Incorporated
+ * Copyright (c) 2023-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,11 @@
  *  #include <ti/drivers/UART2.h> #include <ti/drivers/uart2/UART2WFF3.h>
  *  @endcode
  *
+ *  @warning Due to hardware constraints, the UART2 driver for WFF3 devices
+ *  has limitations if the source or destination buffers reside in external
+ *  memory. For read and write operations, UART2_Mode_CALLBACK is not supported
+ *  for buffers in external memory (Flash or PSRAM).
+ *
  *  Refer to @ref UART2.h for a complete description of APIs and examples of
  *  use.
  *
@@ -62,6 +67,7 @@
 #include <ti/drivers/dpl/HwiP.h>
 #include <ti/drivers/dpl/SemaphoreP.h>
 #include <ti/drivers/UART2.h>
+#include <ti/drivers/xmem/XMEMWFF3.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -81,6 +87,23 @@ typedef enum
     UART2WFF3_CODING_SIR    = 1, /*!< TXD/RXD coded as Serial Infrared */
     UART2WFF3_CODING_SIR_LP = 2, /*!< TXD/RXD coded as Low-Power Serial Infrared */
 } UART2WFF3_CodingScheme;
+
+/*!
+ *  @brief  Bounce buffer descriptor for UART2 external-memory staging.
+ *
+ *  The DMA used by the UART2 driver on CC35xx cannot access external memory
+ *  (PSRAM or external flash) directly. The UART2 driver will stage data through
+ *  internal RAM buffers described by this type before transmitting data.
+ *
+ *  `size` should be set to the largest transaction expected to/from external
+ *  memory. `buffer` must point to internal RAM aligned to 4 bytes and placed in
+ *  the `.internalRAM.bss` section.
+ */
+typedef struct
+{
+    size_t size;           /*!< Capacity of the buffer in bytes; 0 disables the buffer */
+    unsigned char *buffer; /*!< Pointer to the internal-RAM backing array */
+} UART2WFF3_BounceBuffer;
 
 /*!
  *  @brief  UART2WFF3 Hardware attributes
@@ -133,16 +156,20 @@ typedef enum
 typedef struct
 {
     UART2_BASE_HWATTRS
-    uint32_t txDmaChannel;               /*!< DMA TX channel number */
-    uint32_t rxDmaChannel;               /*!< DMA RX channel number */
-    int32_t txPinMux;                    /*!< TX PIN mux value */
-    int32_t rxPinMux;                    /*!< RX PIN mux value */
-    int32_t ctsPinMux;                   /*!< CTS PIN mux value for flow control */
-    int32_t rtsPinMux;                   /*!< RTS PIN mux value for flow control */
-    UART2WFF3_CodingScheme codingScheme; /*!< UART TXD/RXD encoding/decoding scheme */
-    uint8_t irLPClkDivider;              /*!< Clock divider for IR Low-Power mode */
-    uint8_t powerID;                     /*!< Power driver ID for this UART instance */
-    bool concatenateFIFO;                /*!< Concatenate RX and TX FIFO if write-only */
+    uint32_t txDmaChannel;                 /*!< DMA TX channel number */
+    uint32_t rxDmaChannel;                 /*!< DMA RX channel number */
+    int32_t txPinMux;                      /*!< TX PIN mux value */
+    int32_t rxPinMux;                      /*!< RX PIN mux value */
+    int32_t ctsPinMux;                     /*!< CTS PIN mux value for flow control */
+    int32_t rtsPinMux;                     /*!< RTS PIN mux value for flow control */
+    UART2WFF3_CodingScheme codingScheme;   /*!< UART TXD/RXD encoding/decoding scheme */
+    uint8_t irLPClkDivider;                /*!< Clock divider for IR Low-Power mode */
+    uint8_t powerID;                       /*!< Power driver ID for this UART instance */
+    bool concatenateFIFO;                  /*!< Concatenate RX and TX FIFO if write-only */
+    UART2WFF3_BounceBuffer TXBounceBuffer; /*!< Bounce buffer for TX transactions */
+    UART2WFF3_BounceBuffer RXBounceBuffer; /*!< Bounce buffer for RX transactions */
+    bool usePsram;                         /*!< Will the driver need to transact to/from PSRAM */
+    bool useFlash;                         /*!< Will the driver need to transcat from Flash */
 } UART2WFF3_HWAttrs;
 
 /*!
@@ -157,6 +184,9 @@ typedef struct
     Power_NotifyObj postNotify; /*!< For configuring IO pins after returning from sleep */
     uint32_t *dmaTxDestAddr;
     uint32_t *dmaRxSrcAddr;
+    XMEM_Handle psramHandleTX;
+    XMEM_Handle psramHandleRX;
+    XMEM_Handle flashHandleTX;
 } UART2WFF3_Object, *UART2WFF3_Handle;
 
 #ifdef __cplusplus

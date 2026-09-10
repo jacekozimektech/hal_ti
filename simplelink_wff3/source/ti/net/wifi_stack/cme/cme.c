@@ -77,6 +77,7 @@
 
 #include "drv_ext_app.h"
 #include "wpa_supplicant/ap.h"
+#include "wpa_supplicant/bss.h"
 #include "wlan_links.h"
 #include "control_cmd_fw.h"
 #include "wpa_supplicant_i.h"
@@ -92,7 +93,9 @@
 extern void cmeTestInit();
 extern bool mx_driver_scan_is_scan_tagged_frame(void *pDesc);
 extern void set_finish_wlan_supplicant_operation();
+#ifndef TI_STA_ONLY_BUILD
 extern void cmeP2pListen();
+#endif
 extern void cfgBuildP2pParameters(struct wpa_config *conf);
 extern  cmeScanSharedInfo_t*    scanResultTable_GetCmeScanDbPointer();
 extern int32_t is_wlan_periodic_scan_in_progress();
@@ -100,10 +103,12 @@ extern ti_driver_ifData_t * getDriverForRoleId(uint32_t aRoleId, struct wpa_glob
 extern void CME_periodic_scan_timer_stop();
 extern void CME_start_periodic_scan_timer();
 extern TUdata *gUdataCB;
+#ifndef TI_STA_ONLY_BUILD
 extern int ti_driver_inact_mili(void *priv, const u8 *addr);
 
 void CME_start_peer_aging_timer(OsiTimer_t* osTimer, uint32_t timeout);
 void CME_peer_aging_timer_stop(OsiTimer_t* osTimer);
+#endif
 
 extern void wlanLinks_getPeerList(int32_t* numOfPeers, uint8_t** mac_addr_peer_list);
 
@@ -421,7 +426,8 @@ typedef struct
         wlanSetExtWpsSession_t        wpsParams;
         CmeWlanRocParam_t             rocParam;
         CmeWlanSendActionParam_t      sendActionParam;
-        WlanP2pConfigChannelParam_t   p2pConfigParams; 
+        WlanP2pConfigChannelParam_t   p2pConfigParams;
+        WlanP2pGroupAddParam_t        p2pGroupAddParams; 
         WlanNonPrefChannels_t         nonPrefChannels;
         CMEWlanSetVendorElements_t    vendorElements;
         uint32_t                      peerAgingTimeout;
@@ -565,6 +571,8 @@ void CME_supplicantPeriodicActivities(void);
 void CME_MsgFree(cmeMsg_t *apMsg);
 static void cme_debug_print_cME_queue_content();
 static void debug_print_msg_type_subtype(cmeMsg_t* msg);
+int32_t cme_update_ap_beacon_tx_power(ti_driver_ifData_t *pDrv, uint32_t roleId, int8_t tx_power);
+int32_t cme_get_role_channel(WlanRole_e role, uint16_t *channelNum, uint32_t *roleId);
 
 // ============================================================================
 //      External Functions
@@ -590,6 +598,232 @@ uint32_t CME_GetStartedRoleBitmap()
 
     return gRoleAppsParams.hostConfiguredRolesBitmap ;
 }
+// ----------------------------------------------------------------------------
+
+int32_t CME_SetTxPower(WlanTxPowerSet_t *params)
+{
+    int32_t ret = 0;
+    WlanTxPowerSet_t *txPowerParams = params;
+    uint16_t channelNum;
+    uint32_t roleId;
+    int8_t regulatory_max;
+    int8_t actual_tx_power;
+    ti_driver_ifData_t *pDrv;
+    uint32_t role_bitmap = CME_GetStartedRoleBitmap();
+
+    /* Check if role is up */
+    if((ROLE_IS_TYPE_STA(txPowerParams->role) && (0 == (role_bitmap & BIT_x(ROLE_STA)))) ||
+       (ROLE_IS_TYPE_AP(txPowerParams->role) && (0 == (role_bitmap & BIT_x(ROLE_AP)))))
+    {
+        CME_PRINT_REPORT_ERROR("\n\rThe specified role is not active.\n\r");
+        ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                       WLAN_ERROR_MODULE__COMMANDS,
+                       WLAN_ERROR_TYPE__INVALID_PARAM_SET_TYPE);
+        return ret;
+    }
+
+    /* Get current channel for the role */
+    ret = cme_get_role_channel(txPowerParams->role, &channelNum, &roleId);
+    if (ret != 0)
+    {
+        return ret;
+    }
+
+    /* Get driver instance now that roleId is known */
+    pDrv = getDriverForRoleId(roleId, gpSupplicantGlobals);
+
+    /* Get regulatory max power for this channel */
+    if (!regulatoryDomain_getChMaxPower(channelNum, &regulatory_max))
+    {
+        CME_PRINT_REPORT_ERROR("\n\rFailed to get regulatory maximum TX power.\n\r");
+        if (ret != 0)
+        {
+            return ret;
+        }
+    }
+
+    /* Determine actual TX power to apply - cap to min(WLAN_MAX_TX_POWER_DBM, regulatory_max) */
+    if (txPowerParams->tx_power_dbm > MIN(WLAN_MAX_TX_POWER_DBM, regulatory_max) || txPowerParams->tx_power_dbm < WLAN_MIN_TX_POWER_DBM)
+    {
+        actual_tx_power = MIN(WLAN_MAX_TX_POWER_DBM, regulatory_max);
+        GTRACE(GRP_SL_DISPATCH, "CME_SetTxPower: invalid tx_power=%d dBm (valid range [%d, %d] dBm), using %d dBm",
+               txPowerParams->tx_power_dbm, WLAN_MIN_TX_POWER_DBM, actual_tx_power, actual_tx_power);
+    }
+    else /* Use requested value*/
+    {
+        actual_tx_power = txPowerParams->tx_power_dbm;
+    }
+
+    /* Apply TX power to firmware*/
+    if (pDrv)
+    {
+        regulatoryDomain_setRoleMaxTxPower(pDrv, actual_tx_power);
+        if (pDrv->fwMaxTxPower == actual_tx_power)
+        {
+            CME_PRINT_REPORT_ERROR("\n\rTX power set to %d dBm for role %d (channel %d).\n\r",
+                   actual_tx_power, roleId, channelNum);
+            /* Update beacon for AP role to advertise new TX power */
+#ifndef TI_STA_ONLY_BUILD
+            if (ROLE_IS_TYPE_AP(txPowerParams->role))
+            {
+                ret = cme_update_ap_beacon_tx_power(pDrv, roleId, actual_tx_power);
+            }
+#endif
+        }
+        else
+        {
+            CME_PRINT_REPORT_ERROR("\n\rFailed to set TX power");
+            ret = -1;
+        }
+    }
+    else
+    {
+        CME_PRINT_REPORT_ERROR("\n\rFailed to get driver instance for role %d.\n\r", roleId);
+        ret = -1;
+    }
+    return ret;
+}
+// ----------------------------------------------------------------------------
+#ifndef TI_STA_ONLY_BUILD
+int32_t cme_update_ap_beacon_tx_power(ti_driver_ifData_t *pDrv, uint32_t roleId, int8_t tx_power)
+{
+    struct hostapd_hw_modes *mode;
+    struct hostapd_data *hapd;
+    struct wpa_supplicant *wpa_s = drv_getIfaceFromRoleID(gpSupplicantGlobals, roleId);
+    int current_channel;
+
+    if (!wpa_s || !wpa_s->ap_iface || !wpa_s->ap_iface->bss[0])
+    {
+        CME_PRINT_REPORT_ERROR("\n\rWarning: AP iface not available for beacon update.\n\r");
+        return -1;
+    }
+
+    hapd = wpa_s->ap_iface->bss[0];
+
+    pDrv->configuredApTxPower = tx_power;
+
+    if (hapd->iface && hapd->iface->current_mode && hapd->iconf)
+    {
+        mode = hapd->iface->current_mode;
+        current_channel = hapd->iconf->channel;
+        for (int i = 0; i < mode->num_channels; i++)
+        {
+            if (mode->channels[i].chan == current_channel)
+            {
+                mode->channels[i].max_tx_power = tx_power;
+                break;
+            }
+        }
+    }
+
+    if (wpa_supplicant_ap_update_beacon(wpa_s) < 0)
+    {
+        CME_PRINT_REPORT_ERROR("\n\rWarning: Failed to update beacon with new TX power.\n\r");
+        return -1;
+    }
+    return 0;
+}
+#endif
+// ----------------------------------------------------------------------------
+int32_t cme_get_role_channel(WlanRole_e role, uint16_t *channelNum, uint32_t *roleId)
+{
+    int32_t freq;
+    uint8_t band;
+    Channel_e channel;
+    ti_driver_ifData_t *pDrv;
+    if (ROLE_IS_TYPE_STA(role))
+    {
+        if (!CmeStationFlowIsConnected())
+        {
+            CME_PRINT_REPORT_ERROR("\n\rSTA must be connected to get channel for role.\n\r");
+            return -1;
+        }
+        *roleId = drv_getRoleIdFromType(gpSupplicantGlobals, ROLE_STA);
+    }
+    else if (ROLE_IS_TYPE_AP(role))
+    {
+        *roleId = drv_getRoleIdFromType(gpSupplicantGlobals, ROLE_AP);
+    }
+    else
+    {
+        CME_PRINT_REPORT_ERROR("\n\rInvalid role %d.\n\r", role);
+        return -1;
+    }
+    pDrv = getDriverForRoleId(*roleId, gpSupplicantGlobals);
+    freq = pDrv->freq;
+    if (freq_to_chan(freq, &channel, &band) < 0)
+    {
+        CME_PRINT_REPORT_ERROR("\n\rFailed to get channel for role.\n\r");
+        return -1;
+    }
+    *channelNum = (uint8_t)channel;
+    return 0;
+}
+// ----------------------------------------------------------------------------
+
+int32_t CME_GetTxPower(WlanTxPowerGet_t *params)
+{
+    struct wpa_supplicant *wpa_s;
+    WlanTxPowerGet_t *txPowerGet = params;
+    ti_driver_ifData_t *pDrv;
+    uint32_t roleId;
+    int32_t ret;
+    RoleType_e roleType;
+    uint32_t role_bitmap = CME_GetStartedRoleBitmap();
+
+    /* Check if role is up */
+    if((ROLE_IS_TYPE_STA(txPowerGet->role) && (0 == (role_bitmap & BIT_x(ROLE_STA)))) ||
+       (ROLE_IS_TYPE_AP(txPowerGet->role) && (0 == (role_bitmap & BIT_x(ROLE_AP)))))
+    {
+        CME_PRINT_REPORT_ERROR("\n\rThe specified role is not active.\n\r");
+        ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                       WLAN_ERROR_MODULE__COMMANDS,
+                       WLAN_ERROR_TYPE__INVALID_PARAM_GET_TYPE);
+        return ret;
+    }
+
+    /* Determine role type */
+    if (ROLE_IS_TYPE_STA(txPowerGet->role))
+    {
+        if (!CmeStationFlowIsConnected())
+        {
+            CME_PRINT_REPORT_ERROR("\n\rTX power is available only when station is connected.\n\r");
+            ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                           WLAN_ERROR_MODULE__COMMANDS,
+                           WLAN_ERROR_TYPE__INVALID_PARAM_GET_TYPE);
+            return ret;
+        }
+        roleId = drv_getRoleIdFromType(gpSupplicantGlobals, ROLE_STA);
+    }
+    else if (ROLE_IS_TYPE_AP(txPowerGet->role))
+    {
+        roleId = drv_getRoleIdFromType(gpSupplicantGlobals, ROLE_AP);
+    }
+    else
+    {
+        CME_PRINT_REPORT_ERROR("\n\rCME_GetTxPower: invalid role %d\n\r", txPowerGet->role);
+        ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                         WLAN_ERROR_MODULE__COMMANDS,
+                         WLAN_ERROR_TYPE__INVALID_ROLE);
+        return ret;
+    }
+    /* Get driver instance and read fwMaxTxPower */
+    pDrv = getDriverForRoleId(roleId, gpSupplicantGlobals);
+    if (pDrv)
+    {
+        txPowerGet->tx_power_dbm = pDrv->fwMaxTxPower;
+    }
+    else
+    {
+        CME_PRINT_REPORT_ERROR("\n\rFailed to get driver instance for role.\n\r");
+        ret = WlanError(WLAN_ERROR_SEVERITY__LOW,
+                       WLAN_ERROR_MODULE__COMMANDS,
+                       WLAN_ERROR_TYPE__INVALID_PARAM_GET_TYPE);
+        return ret;
+    }
+    return 0;
+}
+
 void CME_SetPowerSaveMode(uint8_t power_save)
 {
     gRoleAppsParams.devicePowerSaveMode = power_save;
@@ -603,10 +837,12 @@ uint8_t CME_GetPowerSaveMode()
     return gRoleAppsParams.devicePowerSaveMode;
 }
 // ----------------------------------------------------------------------------
-void CME_SetApParams(void *apParams)
+#ifndef TI_STA_ONLY_BUILD
+int CME_SetApParams(void *apParams)
 {
-    CmeSetApParams(apParams);
+    return CmeSetApParams(apParams);
 }
+#endif
 // ----------------------------------------------------------------------------
 void CME_SetStaParams(void *staParams)
 {
@@ -879,32 +1115,31 @@ TMacAddr     g_fuse_mac_addr[6]= {
 int16_t CME_GetMacAddress(uint32_t roleType, uint8_t *pMacAddress)
 {
     /*get mac address from  g_fuse_mac_addr */
-    if (WLAN_ROLE_STA == roleType)
+    switch (roleType)
     {
-        os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_STA], MAC_ADDR_LEN);
-        return 0;
-    }
-    else if (WLAN_ROLE_AP == roleType)
-    {
-        os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_AP], MAC_ADDR_LEN);
-        return 0;
-    }
-    else if (WLAN_ROLE_P2P_GO == roleType)
-    {
-        //WLAN_MAC_OFFSET_ROLE_P2P_GO is same mac as the WLAN_MAC_OFFSET_ROLE_AP
-        os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_P2P_GO], MAC_ADDR_LEN);
-        return 0;
+        case WLAN_ROLE_STA:
+            os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_STA], MAC_ADDR_LEN);
+            break;
 
+        case WLAN_ROLE_AP:
+        case WLAN_ROLE_P2P_GO:
+            os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_AP], MAC_ADDR_LEN);
+            break;
+
+        case WLAN_ROLE_DEVICE:
+            os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_DEVICE], MAC_ADDR_LEN);
+            break;
+
+        case WLAN_ROLE_P2P_CL:
+            os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_AP], MAC_ADDR_LEN);
+            break;
+
+        default:
+            return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_RET_CODE_DEV_NOT_STARTED);
+            break;
     }
-    else if (WLAN_ROLE_DEVICE == roleType)
-    {
-        os_memcpy(pMacAddress, g_fuse_mac_addr[WLAN_MAC_OFFSET_ROLE_DEVICE], MAC_ADDR_LEN);
-        return 0;
-    }
-    else
-    {
-        return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_RET_CODE_DEV_NOT_STARTED);
-    }
+
+    return 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -1180,7 +1415,7 @@ int16_t CME_SetScanDwellTime(WlanScanDwellTime_t* dwellTimes)
 
     msg.msgId = CME_MESSAGE_ID_SET_SCAN_DWELL_TIME;
     os_memcpy(&(msg.un.dwellTimes), dwellTimes, sizeof(WlanScanDwellTime_t));
-
+    
     return pushMsg2Queue(&msg);
 }
 
@@ -1196,14 +1431,14 @@ int16_t CME_SetP2pCmd(WlanP2pCmd_t *p2pCmdParams)
     {
         Bool32 isDfsChannel = FALSE;
 
-       msg.un.p2pConfigParams.operChannel   = p2pCmdParams->Data.cfgParams.operChannel;
-       msg.un.p2pConfigParams.operClass     = p2pCmdParams->Data.cfgParams.operClass;
-       msg.un.p2pConfigParams.listenChannel = p2pCmdParams->Data.cfgParams.listenChannel;
-       msg.un.p2pConfigParams.listenClass   = p2pCmdParams->Data.cfgParams.listenClass;
-       msg.un.p2pConfigParams.goIntent      = p2pCmdParams->Data.cfgParams.goIntent;
+        msg.un.p2pConfigParams.operChannel   = p2pCmdParams->Data.cfgParams.operChannel;
+        msg.un.p2pConfigParams.operClass     = p2pCmdParams->Data.cfgParams.operClass;
+        msg.un.p2pConfigParams.listenChannel = p2pCmdParams->Data.cfgParams.listenChannel;
+        msg.un.p2pConfigParams.listenClass   = p2pCmdParams->Data.cfgParams.listenClass;
+        msg.un.p2pConfigParams.goIntent      = p2pCmdParams->Data.cfgParams.goIntent;
 
        //Check validity of operating channel
-       if (p2pCmdParams->Data.cfgParams.operChannel != 0)
+        if (p2pCmdParams->Data.cfgParams.operChannel != 0)
 		{
 			ret = regulatoryDomain_IsChannelSupported(p2pCmdParams->Data.cfgParams.operChannel, &isDfsChannel);
 			if (ret == 0)
@@ -1227,7 +1462,31 @@ int16_t CME_SetP2pCmd(WlanP2pCmd_t *p2pCmdParams)
 			}
 		}
     }
+    else if (p2pCmdParams->Id == P2P_CMD_ID_GROUP_ADD)
+    {
+        uint32_t postfixLen = strlen(p2pCmdParams->Data.groupAddParams.ssidPostfix);
 
+        if (postfixLen >= sizeof(msg.un.p2pGroupAddParams.ssidPostfix))
+        {
+            CME_PRINT_REPORT_ERROR("\r\np2p_group_add: SSID postfix exceeds maximum length");
+            return WlanError(WLAN_ERROR_SEVERITY__LOW,
+                           WLAN_ERROR_MODULE__COMMANDS,
+                           WLAN_ERROR_TYPE__INVALID_PARAM_NAME);
+        }
+        
+        if (CME_GetStartedRoleBitmap() & BIT_x(ROLE_AP))
+        {
+            CME_PRINT_REPORT_ERROR("\r\nCME_SetP2pCmd: p2p_group_add rejected - AP role is active");
+
+              return WlanError(WLAN_ERROR_SEVERITY__LOW,
+                               WLAN_ERROR_MODULE__COMMANDS,
+                               WLAN_ERROR_TYPE__ROLE_NOT_SUPPORTED);
+        }
+        msg.un.p2pGroupAddParams.freq    = p2pCmdParams->Data.groupAddParams.freq;
+        os_memcpy(msg.un.p2pGroupAddParams.ssidPostfix,
+                p2pCmdParams->Data.groupAddParams.ssidPostfix,
+                postfixLen + 1);
+    }
     
     return pushMsg2Queue(&msg);
 }
@@ -1333,7 +1592,7 @@ int16_t CME_SetSchedScanPlans(char *sched_scan_plans)
     }
 
     os_memcpy(msg.un.sched_scan_plans, sched_scan_plans, len);
-
+    
     return pushMsg2Queue(&msg);
 }
 
@@ -1341,37 +1600,52 @@ int16_t CME_SetSchedScanPlans(char *sched_scan_plans)
 
 /* Sec type to key management type LUT */
 static const uint32_t SecTypeToWPAkey_lut[] = {
-/* (0) SL_SEC_TYPE_OPEN  */           WPA_KEY_MGMT_NONE,
-/* (1) SL_SEC_TYPE_WEP  */            WPA_KEY_MGMT_NONE,
-/* (2) SL_SEC_TYPE_WPA_WPA2  */       WPA_KEY_MGMT_PSK,
-/* (3) SL_SEC_TYPE_WPS_PBC  */        WPA_KEY_MGMT_WPS,
-/* (4) SL_SEC_TYPE_WPS_PIN  */        WPA_KEY_MGMT_WPS,
-/* (5) CME_SEC_TYPE_WPA_ENT  */       WPA_KEY_MGMT_UNEXPECTED,
-/* (6) SL_SEC_TYPE_P2P_PBC  */        WPA_KEY_MGMT_NONE,
-/* (7) SL_SEC_TYPE_P2P_PIN_KEYPAD */  WPA_KEY_MGMT_NONE,
-/* (8) SL_SEC_TYPE_P2P_PIN_DISPLAY */ WPA_KEY_MGMT_NONE,
-/* (9) SL_SEC_TYPE_P2P_PIN_AUTO */    WPA_KEY_MGMT_UNEXPECTED,
-/* (10) SL_SEC_TYPE_WEP_SHARED */     WPA_KEY_MGMT_NONE,
-/* (11) CME_SEC_TYPE_WPA2_PLUS */     WPA_KEY_MGMT_PSK_SHA256,
-/* (12) CME_SEC_TYPE_WPA3 */          WPA_KEY_MGMT_SAE,
-/* (13) WLAN_SEC_TYPE_WPA2_AES_ONLY_PMF */      WPA_KEY_MGMT_PSK,
-/* (14) WLAN_SEC_TYPE_WPA2_AES_ONLY_NO_PMF */   WPA_KEY_MGMT_PSK,
-/* (15) UNEXPECTED */                 WPA_KEY_MGMT_UNEXPECTED,
-/* (16) WLAN_SEC_TYPE_WPA2_WPA3 */    WPA_KEY_MGMT_PSK | WPA_KEY_MGMT_PSK_SHA256 | WPA_KEY_MGMT_SAE
+/* (0)  WLAN_SEC_TYPE_OPEN  */            WPA_KEY_MGMT_NONE,
+/* (1)  WLAN_SEC_TYPE_WEP  */             WPA_KEY_MGMT_NONE,
+/* (2)  WLAN_SEC_TYPE_WPA_WPA2  */        WPA_KEY_MGMT_PSK,
+/* (3)  WLAN_SEC_TYPE_WPS_PBC  */         WPA_KEY_MGMT_WPS,
+/* (4)  WLAN_SEC_TYPE_WPS_PIN  */         WPA_KEY_MGMT_WPS,
+/* (5)  CME_SEC_TYPE_WPA_ENT  */          WPA_KEY_MGMT_UNEXPECTED,
+/* (6)  WLAN_SEC_TYPE_P2P_PBC  */         WPA_KEY_MGMT_NONE,
+/* (7)  WLAN_SEC_TYPE_P2P_PIN_KEYPAD */   WPA_KEY_MGMT_NONE,
+/* (8)  WLAN_SEC_TYPE_P2P_PIN_DISPLAY */  WPA_KEY_MGMT_NONE,
+/* (9)  WLAN_SEC_TYPE_P2P_PIN_AUTO */     WPA_KEY_MGMT_UNEXPECTED,
+/* (10) WLAN_SEC_TYPE_WEP_SHARED */       WPA_KEY_MGMT_NONE,
+/* (11) CME_SEC_TYPE_WPA2_PLUS */         WPA_KEY_MGMT_PSK_SHA256,
+/* (12) CME_SEC_TYPE_WPA3 */              WPA_KEY_MGMT_SAE,
+/* (13) WLAN_SEC_TYPE_WPA2_AES_ONLY_PMF */     WPA_KEY_MGMT_PSK,
+/* (14) WLAN_SEC_TYPE_WPA2_AES_ONLY_NO_PMF */  WPA_KEY_MGMT_PSK,
+/* (15) UNEXPECTED */                     WPA_KEY_MGMT_UNEXPECTED,
+/* (16) WLAN_SEC_TYPE_WPA2_WPA3 */        WPA_KEY_MGMT_PSK | WPA_KEY_MGMT_PSK_SHA256 | WPA_KEY_MGMT_SAE,
+/* (17) CME_SEC_TYPE_WPA_ENT */           WPA_KEY_MGMT_UNEXPECTED,
+/* (18) CME_SEC_TYPE_WPA */               WPA_KEY_MGMT_UNEXPECTED,
+/* (19) CME_SEC_TYPE_WEP_SHARED */        WPA_KEY_MGMT_UNEXPECTED,
+/* (20) WLAN_SEC_TYPE_WPA2_FT */          WPA_KEY_MGMT_PSK | WPA_KEY_MGMT_FT_PSK,
+/* (21) WLAN_SEC_TYPE_WPA2_PLUS_FT */     WPA_KEY_MGMT_PSK_SHA256 | WPA_KEY_MGMT_FT_PSK,
+/* (22) WLAN_SEC_TYPE_WPA3_FT */          WPA_KEY_MGMT_SAE | WPA_KEY_MGMT_FT_SAE,
+/* (23) WLAN_SEC_TYPE_WPA2_WPA3_FT */     WPA_KEY_MGMT_PSK | WPA_KEY_MGMT_PSK_SHA256 | WPA_KEY_MGMT_SAE | WPA_KEY_MGMT_FT_PSK | WPA_KEY_MGMT_FT_SAE,
 };
 
 
 /*-------------------------------------*/
 /* Get the managment key by sec type   */
 /*-------------------------------------*/
-int32_t CME_WlanGetKeyMngtBySecType (uint8_t secType, uint32_t *pKeyMgmtType)
+int32_t CME_WlanGetKeyMngtBySecType(uint8_t secType, uint32_t *pKeyMgmtType)
 {
     HOOK(HOOK_IN_CME);
 
     int32_t status = 0;
+    uint32_t size = sizeof(SecTypeToWPAkey_lut) / sizeof(uint32_t);
 
     /* get the sec type from the LUT */
-    *pKeyMgmtType = SecTypeToWPAkey_lut[secType & 0xF];
+    if (secType >= size)
+    {
+        *pKeyMgmtType = WPA_KEY_MGMT_UNEXPECTED;
+    }
+    else
+    {
+        *pKeyMgmtType = SecTypeToWPAkey_lut[secType];
+    }
 
     if(*pKeyMgmtType == WPA_KEY_MGMT_UNEXPECTED)
     {
@@ -1511,7 +1785,66 @@ int32_t CME_WlanConnectValidateReq (CMEWlanConnectCommon_t *apCmd, BOOLEAN  *pIs
 }
 
 
+// ----------------------------------------------------------------------------
+static int32_t cmeWlanConnectValidateCommon(CMEWlanConnectCommon_t *pCommon,
+                                            uint32_t *pKeyMgmtType,
+                                            BOOLEAN  *pIsProfileConnection)
+{
+    int32_t status;
 
+    if (((pCommon->SecType == CME_SEC_TYPE_WPA2_WPA3) ||
+         (pCommon->SecType == CME_SEC_TYPE_WPA2_WPA3_FT)) &&
+        (l2_cfg_isMixedModeSupported() == FALSE))
+    {
+        CME_PRINT_REPORT("\n\rCan't connect to AP since WPA2/WPA3 "
+                         "mixed mode isn't supported");
+        return WlanError(WLAN_ERROR_SEVERITY__LOW,
+                         WLAN_ERROR_MODULE__CME,
+                         WLAN_ERROR_TYPE__INVALID_PARAM_SEC_TYPE);
+    }
+
+    status  = CME_WlanGetKeyMngtBySecType(pCommon->SecType, pKeyMgmtType);
+    if (status != 0)
+    {
+        return status;
+    }
+
+    status = CME_WlanConnectValidateReq(pCommon, pIsProfileConnection);
+
+    return status;
+}
+
+// Validate connect params, allocate, and copy cmd buffer.
+// pSrc may be larger than pCommon (EAP case); baseSize = sizeof the full struct.
+// ppCmd is set to the allocated buffer on success; untouched on failure.
+static int32_t cmeWlanConnectPrepareCmd(CMEWlanConnectCommon_t *pCommon,
+                                        const void             *pSrc,
+                                        uint32_t                baseSize,
+                                        uint32_t               *pKeyMgmtType,
+                                        BOOLEAN                *pIsProfileConnection,
+                                        void                  **ppCmd)
+{
+    int32_t  status;
+    uint32_t cmdLen;
+
+    status = cmeWlanConnectValidateCommon(pCommon, pKeyMgmtType, pIsProfileConnection);
+    if (0 != status)
+    {
+        return status;
+    }
+
+    // Allocate and copy — dispatcher frees cmd memory after CME_WlanConnect returns.
+    cmdLen = baseSize + 1 + pCommon->SsidLen + pCommon->PasswordLen;
+    *ppCmd = os_malloc(cmdLen);
+    if (NULL == *ppCmd)
+    {
+        CME_PRINT_REPORT("\n\rERROR!! CME:allocation of pCmd failed");
+        return WlanError(WLAN_ERROR_SEVERITY__MID, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__MALLOC);
+    }
+
+    os_memcpy(*ppCmd, pSrc, cmdLen);
+    return 0;
+}
 
 // ----------------------------------------------------------------------------
 int32_t CME_WlanConnect(CMEWlanConnectCommon_t *apCmd, CMEEapWlanConnect_t* apEapCmd, BOOLEAN requestByHost)
@@ -1522,107 +1855,55 @@ int32_t CME_WlanConnect(CMEWlanConnectCommon_t *apCmd, CMEEapWlanConnect_t* apEa
     CMEWlanConnectCommon_t *pCmd = NULL;
     CMEEapWlanConnect_t *pEapCmd = NULL;
 
-    uint32_t cmdLen;
-
-    if(apCmd)
+    if (apCmd)
     {
-        /* extract the corresponding key managment */
-        status = CME_WlanGetKeyMngtBySecType (apCmd->SecType, &msg.un.wlanConnect.keyMgmtType);
-
-        /* check connection params and fill the security type */
-        status |= CME_WlanConnectValidateReq(apCmd, &isProfileConnection);
-
-
-        /* Connect cmd is invalid/wrong secType - just return the error */
-        if (0 != status)
-        {
-            return status;
-        }
-
-        // have to allocate memory and copy the command since dispatcher
-        // frees command memory after this function returns.
-        cmdLen = sizeof(CMEWlanConnectCommon_t) + 1 + apCmd->SsidLen + apCmd->PasswordLen;
-        pCmd = os_malloc(cmdLen); //Should be ull since that in connect while disconnecting and in
-                                                           //fast connect we keep the command till we use it.
-
-
-        // In case of allocation failure send error indication to host
-        if (NULL == pCmd)
-        {
-            status = WlanError(WLAN_ERROR_SEVERITY__MID, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__MALLOC);
-            CME_PRINT_REPORT("\n\rERROR!! CME:allocation of pCmd failed");
-        }
-        else
-        {
-            // Copy the command to a local buffer and send a message to invoke the CME context
-            os_memcpy(pCmd, apCmd, cmdLen);
-        }
-
-
+        status = cmeWlanConnectPrepareCmd(apCmd,
+                                          apCmd,
+                                          sizeof(CMEWlanConnectCommon_t),
+                                          &msg.un.wlanConnect.keyMgmtType,
+                                          &isProfileConnection,
+                                          (void **)&pCmd);
     }
-    else //apEapCmd
+    else if (apEapCmd)
     {
-        /* extract the corresponding key managment */
-        status = CME_WlanGetKeyMngtBySecType (apEapCmd->EapCommonConnect.SecType, &msg.un.wlanConnect.keyMgmtType);
-
-        /* check connection params and fill the security type */
-        status |= CME_WlanConnectValidateReq(&apEapCmd->EapCommonConnect, &isProfileConnection);
-
-
-        /* Connect cmd is invalid/wrong secType - just return the error */
-        if (0 != status)
-        {
-            return status;
-        }
-
-        // have to allocate memory and copy the command since dispatcher
-        // frees command memory after this function returns.
-        cmdLen = sizeof(CMEEapWlanConnect_t) + 1 + apEapCmd->EapCommonConnect.SsidLen + apEapCmd->EapCommonConnect.PasswordLen;
-        pEapCmd = os_malloc(cmdLen); //Should be ull since that in connect while disconnecting and in
-                                                           //fast connect we keep the command till we use it.
-
-
-        // In case of allocation failure send error indication to host
-        if (NULL == pEapCmd)
-        {
-            status = WlanError(WLAN_ERROR_SEVERITY__MID, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__MALLOC);
-            CME_PRINT_REPORT("\n\rERROR!! CME:allocation of ENT pCmd  failed");
-        }
-        else
-        {
-            // Copy the command to a local buffer and send a message to invoke the CME context
-            os_memcpy(pEapCmd, apEapCmd, cmdLen);
-        }
-
-
+        status = cmeWlanConnectPrepareCmd(&apEapCmd->EapCommonConnect,
+                                          apEapCmd,
+                                          sizeof(CMEEapWlanConnect_t),
+                                          &msg.un.wlanConnect.keyMgmtType,
+                                          &isProfileConnection,
+                                          (void **)&pEapCmd);
+    }
+    else
+    {
+        status = WlanError(WLAN_ERROR_SEVERITY__MID,
+                           WLAN_ERROR_MODULE__CME,
+                           WLAN_ERROR_TYPE__NULL_BUF);
     }
 
-
-    if (pCmd || pEapCmd)
+    if (0 != status)
     {
-
-        msg.msgId = CME_MESSAGE_ID_WLAN_CONNECT;
-        msg.un.wlanConnect.pConnectCmd = pCmd;
-        msg.un.wlanConnect.pConnectEapCmd = pEapCmd;
-
-
-        msg.generalData = 0;
-
-        if (isProfileConnection)
-        {
-            //indicates if this is profiles connection case
-            msg.generalData |= CME_GENERAL_DATA_CONNECT_IS_PROFILES;
-        }
-
-        if (requestByHost)
-        {
-            //indicates if this request has been asked by host/user
-            msg.generalData |= CME_GENERAL_DATA_CONNECT_IS_USER_REQ;
-        }
-
-
-        pushMsg2Queue(&msg);
+        return status;
     }
+
+    msg.msgId = CME_MESSAGE_ID_WLAN_CONNECT;
+    msg.un.wlanConnect.pConnectCmd = pCmd;
+    msg.un.wlanConnect.pConnectEapCmd = pEapCmd;
+
+    msg.generalData = 0;
+
+    if (isProfileConnection)
+    {
+        //indicates if this is profiles connection case
+        msg.generalData |= CME_GENERAL_DATA_CONNECT_IS_PROFILES;
+    }
+
+    if (requestByHost)
+    {
+        //indicates if this request has been asked by host/user
+        msg.generalData |= CME_GENERAL_DATA_CONNECT_IS_USER_REQ;
+    }
+
+    pushMsg2Queue(&msg);
 
     HOOK(HOOK_IN_CME);
 
@@ -1800,12 +2081,20 @@ int16_t CME_RemoveProfile(uint8_t delete_profile_index)
 
 // ----------------------------------------------------------------------------
 #if CC35XX_ADD_SUPPORT_ENT_PROFILE
-int16 CME_AddEapProfile(CMEWlanAddGetEapProfile_t *new_profile)
+int32_t CME_AddEapProfile(CMEWlanAddGetEapProfile_t *new_profile)
 {
     cmeMsg_t msg;
 
-    int16      index;
+    int16 index;
     CMEWlanAddGetEapProfile_t *sl_wlan_add_profile_args = new_profile;
+
+    if ((new_profile->CommonAddProf.SecType == WLAN_SEC_TYPE_WPA2_WPA3) &&
+        (l2_cfg_isMixedModeSupported() == FALSE))
+    {
+        return WlanError(WLAN_ERROR_SEVERITY__LOW,
+                         WLAN_ERROR_MODULE__CME,
+                         WLAN_ERROR_TYPE__INVALID_PARAM_SEC_TYPE);
+    }
 
     int32_t  status = cme_validate_eap_connection_params(sl_wlan_add_profile_args->Common.SsidLen,
                                                        sl_wlan_add_profile_args->Common.PasswordLen,
@@ -1842,10 +2131,45 @@ int16 CME_AddEapProfile(CMEWlanAddGetEapProfile_t *new_profile)
 }
 #endif
 // ----------------------------------------------------------------------------
-int16_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile)
+static int32_t cmeValidateProfileSecType(uint8_t secType, uint8_t passwordLen)
+{
+    switch ((CMESecType_e)secType)
+    {
+        case CME_SEC_TYPE_OPEN:
+            break;
+        case CME_SEC_TYPE_WPA_WPA2:
+        case CME_SEC_TYPE_WPA3:
+        case CME_SEC_TYPE_WPA2_PLUS:
+        case CME_SEC_TYPE_WPA2_FT:
+        case CME_SEC_TYPE_WPA2_PLUS_FT:
+        case CME_SEC_TYPE_WPA3_FT:
+            if (passwordLen > WPA_MAX_PASSPHRASE_LEN)
+            {
+                return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_PASSPHRASE_TOO_LONG);
+            }
+            break;
+        case CME_SEC_TYPE_WPA2_WPA3:
+        case CME_SEC_TYPE_WPA2_WPA3_FT:
+            if (l2_cfg_isMixedModeSupported() == FALSE)
+            {
+                return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__INVALID_PARAM_SEC_TYPE);
+            }
+            if (passwordLen > WPA_MAX_PASSPHRASE_LEN)
+            {
+                return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_PASSPHRASE_TOO_LONG);
+            }
+            break;
+        default:
+            return WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_INVALID_SECURITY_TYPE);
+    }
+    return WLAN_RET_CODE_OK;
+}
+
+// ----------------------------------------------------------------------------
+int32_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile)
 {
     cmeMsg_t   msg;
-    int16_t    status;
+    int32_t    status;
     int16_t    index;
     BOOLEAN    isProfileConnection = TRUE;
     const CMEWlanAddGetProfile_t *cme_wlan_add_profile_args = new_profile;
@@ -1873,30 +2197,8 @@ int16_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile)
     }
     else
     {
-        switch (cme_wlan_add_profile_args->SecType)
-        {
-#if 0            
-            case WLAN_SEC_TYPE_P2P_PBC: // P2P_PBC
-            case SL_SEC_TYPE_P2P_PIN_DISPLAY: // P2P_PIN
-            case SL_SEC_TYPE_P2P_PIN_KEYPAD: // P2P_PIN
-#endif 
-            case WLAN_SEC_TYPE_OPEN:
-                break;
-            case WLAN_SEC_TYPE_WPA_WPA2:
-            case WLAN_SEC_TYPE_WPA3:
-            case WLAN_SEC_TYPE_WPA2_PLUS:
-            case WLAN_SEC_TYPE_WPA2_WPA3:
-            {
-                if (cme_wlan_add_profile_args->PasswordLen > WPA_MAX_PASSPHRASE_LEN)
-                {
-                    status = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_PASSPHRASE_TOO_LONG);
-                }
-            }break;
-
-            default:
-                status = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__CME, WLAN_ERROR_TYPE__HOST_RESPONSE_INVALID_SECURITY_TYPE);
-                break;
-        } // switch (pArgs->sec_type)
+        status = cmeValidateProfileSecType(cme_wlan_add_profile_args->SecType,
+                                           cme_wlan_add_profile_args->PasswordLen);
     }
 
     /* Profile Add cmd param is invalid/wrong secType - just return the error */
@@ -2053,7 +2355,7 @@ void CME_ChannelSwitchSetTxPower(uint8_t channel)
     pDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_STA));
     if(NULL != pDrv)
     {
-        uint8_t maxTxPower;
+        int8_t maxTxPower;
         if(TRUE == regulatoryDomain_getChMaxPower(channel, &maxTxPower))
         {
             regulatoryDomain_setRoleMaxTxPower(pDrv, maxTxPower);
@@ -2195,6 +2497,7 @@ int32_t CME_updateVendorElementsNotify(RoleType_e roleType,  uint16_t vendorElem
 }
 
 
+#ifndef TI_STA_ONLY_BUILD
 int32_t CME_setPeerAgingTimeout(uint32_t agingTimeOut)
 {
     HOOK(HOOK_IN_CME);
@@ -2208,8 +2511,9 @@ int32_t CME_setPeerAgingTimeout(uint32_t agingTimeOut)
 
     return pushMsg2Queue(&msg);
 }
+#endif
 
-
+#ifndef TI_STA_ONLY_BUILD
 int32_t CME_peerAgingSampleTime()
 {
     HOOK(HOOK_IN_CME);
@@ -2220,6 +2524,7 @@ int32_t CME_peerAgingSampleTime()
 
     return pushMsg2Queue(&msg);
 }
+#endif
 
 
 // ----------------------------------------------------------------------------
@@ -2940,7 +3245,9 @@ void cme_Thread(void* apParam)
                             GTRACE(GRP_CME, "CME: CME_MESSAGE_ID_GET_SCAN_RESULTS: roleid=%d, roletype=%d",
                                              pDrv->roleId, pDrv->roleType);
 
+#ifndef TI_STA_ONLY_BUILD
                             cmeStartP2pFind(pDrv->wpa_s, NULL, CME_P2P_DISCOVERY_FIND_TIMEOUT, TRUE);
+#endif
                             
                         }
                         else
@@ -3036,6 +3343,7 @@ void cme_Thread(void* apParam)
                     }
 
                 }break; //CME_MESSAGE_ID_PS_SET
+#ifndef TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_START_AP_WPS_SESSION:
                 {
                     int8_t ret = 0;
@@ -3192,6 +3500,7 @@ void cme_Thread(void* apParam)
                         }
                     }
                 }break; //CME_MESSAGE_ID_SET_EXT_WPS_SESSION
+#endif // TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_WLAN_CONNECT:
                 {
                     GTRACE(GRP_CME, "CME: CME_MESSAGE_ID_WLAN_CONNECT called. CmeStationFlowIsSMIdle=%d, generalData=0x%x (roleid=%d)",
@@ -3211,11 +3520,11 @@ void cme_Thread(void* apParam)
 
                         if(pConnectCmd)
                         {
-                            gSaveCurrentSupplicantProfile = CMEisSameConnectParams(pConnectCmd,SSID_STRING(pConnectCmd));
+                            gSaveCurrentSupplicantProfile = CMEisSameConnectParams(pConnectCmd, SSID_STRING(pConnectCmd), TRUE);
                         }
                         else
                         {
-                            gSaveCurrentSupplicantProfile = CMEisSameConnectParams(&pConnectEapCmd->EapCommonConnect,EAP_SSID_STRING(pConnectEapCmd));
+                            gSaveCurrentSupplicantProfile = CMEisSameConnectParams(&pConnectEapCmd->EapCommonConnect, EAP_SSID_STRING(pConnectEapCmd), TRUE);
                         }
                         GTRACE(GRP_CME, "CME: CMEisSameConnectParams = %d", gSaveCurrentSupplicantProfile);
                         CME_PRINT_REPORT("\n\rCME: CMEisSameConnectParams = %d", gSaveCurrentSupplicantProfile);
@@ -3254,13 +3563,6 @@ void cme_Thread(void* apParam)
                         {
                             //disconnection initiated by user - we remove pmk cache
                             cmeRemoveWpaPmkCache();
-                        }
-                        if (msg.generalData == CME_GENERAL_DATA_DISCONNECT_IS_BSS_LOSS)
-                        {
-                            cmeReassociationParamsStore();
-                        }
-                        else
-                        {
                             cmeReassociationParamsClear();
                         }
 
@@ -3320,7 +3622,9 @@ void cme_Thread(void* apParam)
                     }
                     else if (ROLE_IS_TYPE_DEVICE(pDrv->roleType))
                     {
+#ifndef TI_STA_ONLY_BUILD
                         cmeStopP2pFind(wpa_s);
+#endif
 
                         GTRACE(GRP_SL_DISPATCH,"CME_MESSAGE_ID_WLAN_DISCONNECT: send disconnect event ");
                         CME_CON_PRINT("\n\rCME_MESSAGE_ID_WLAN_DISCONNECT: send disconnect event ");
@@ -3389,7 +3693,6 @@ void cme_Thread(void* apParam)
 
                 }break; // CME_MESSAGE_ID_WLAN_DISCONNECT
 
-
                 case CME_MESSAGE_ID_PROFILE_EAP_ADDED:
                 case CME_MESSAGE_ID_PROFILE_ADDED:
                 {
@@ -3407,6 +3710,7 @@ void cme_Thread(void* apParam)
 				    cmeIsCurrentlyConnectedProfileDeleted(msg.un.deletedProfileIdx);
                 }break; //CME_MESSAGE_ID_PROFILE_REMOVED
 
+#ifndef TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_AP_REMOVE_PEER:
                 {
                     sendInternalEvent = FALSE;
@@ -3472,6 +3776,7 @@ void cme_Thread(void* apParam)
                     }
                 }
                 break; // CME_MESSAGE_ID_AP_REMOVE_PEER
+#endif
                 case CME_MESSAGE_ID_RX_MNG_PACK:
                 {
                     GTRACE(GRP_CME_DEBUG, "CME is sending a management packet to driver ");
@@ -4104,6 +4409,9 @@ void cme_Thread(void* apParam)
                             //validate the fast connection now that it is official success
                             cmeSaveFastConnectionData();
 
+                            //store reassociation related params taken from supplicant
+                            cmeReassociationParamsStore();
+
                             if (ROLE_IS_TYPE_STA(role_type))
                             {
                                 //Check if the transition mode is disabled during the connection with Transition mode
@@ -4338,6 +4646,7 @@ void cme_Thread(void* apParam)
 
                     //notify role activation module in case it de-activates a role and waits for disconnect notification
                 }break; //CME_MESSAGE_ID_WPA_SUPP_DISCONNECTED
+#ifndef TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_P2P_DEV_FOUND:
                 {
                     struct wpa_supplicant *wpa_s;
@@ -4377,9 +4686,12 @@ void cme_Thread(void* apParam)
                     }
 
                 }break;
+#endif
                 case CME_MESSAGE_EXT_APP_PROCESS_PROV_DISC_REQ :
                 {
+#ifndef TI_STA_ONLY_BUILD
                     ext_p2p_process_prov_disc_req( &msg.un.extAppAction.WlanProvDiscResp);
+#endif
                     os_free(msg.un.extAppAction.WlanProvDiscResp.provDiscReqData);
                 }
                 break;
@@ -4480,7 +4792,9 @@ void cme_Thread(void* apParam)
 
                             if (wpa_s != NULL)
                             {
+#ifndef TI_STA_ONLY_BUILD
                                 cmeStopP2pFind(wpa_s);
+#endif
                             }
                             else
                             {
@@ -4490,11 +4804,13 @@ void cme_Thread(void* apParam)
                         }
                         break;
 
+#ifndef TI_STA_ONLY_BUILD
                         case P2P_CMD_ID_GROUP_REMOVE:
                         {
                             cmeP2pGroupRemove();
                         }
                         break;
+#endif
 
                         case P2P_CMD_ID_CONFIG_CHANNELS:
                         {
@@ -4511,18 +4827,26 @@ void cme_Thread(void* apParam)
                             cfgSetP2pParameters(&params);
 
                             //apply changed params on the wpa_supplicant config struct
-                            //1. get device drv
-
                             wpa_s = drv_getP2pDeviceSupplicant();
 
                             if (wpa_s != NULL)
                             {
-                                //2. update p2p
                                 cfgBuildP2pParameters(wpa_s->conf);
+
+                                /* Mark changed fields so wpas_p2p_update_config pushes them
+                                * into the running p2p_data module via p2p_set_listen_channel()
+                                * and p2p_set_oper_channel().
+                                */
+                                wpa_s->conf->changed_parameters |= CFG_CHANGED_P2P_LISTEN_CHANNEL |
+                                                                    CFG_CHANGED_P2P_OPER_CHANNEL;
+                                wpa_supplicant_update_config(wpa_s);
 
                             }
                             else
                             {
+                                /* Device not yet up — channels will be applied at startup via
+                                * cfgBuildP2pParameters() in wpa_config_read(). No action needed.
+                                */
                                 GTRACE(GRP_CME, "CME: ERROR! P2P_CMD_ID_CONFIG_CHANNELS failed - no device roleId!!!");
                                 CME_PRINT_REPORT("\n\r CME: ERROR! P2P_CMD_ID_CONFIG_CHANNELS failed - no device roleId!!!");
                             }
@@ -4530,6 +4854,7 @@ void cme_Thread(void* apParam)
                         }
                         break;
 
+#ifndef TI_STA_ONLY_BUILD
                         case P2P_CMD_ID_LISTEN:
                         {
                             cmeP2pListen();
@@ -4541,7 +4866,16 @@ void cme_Thread(void* apParam)
                             cmeP2pCancel();
                         }
                         break;
+#endif
 
+#ifndef TI_STA_ONLY_BUILD
+                        case P2P_CMD_ID_GROUP_ADD:
+                        {
+                            cmeP2pGroupAdd(msg.un.p2pGroupAddParams.ssidPostfix,
+                                            msg.un.p2pGroupAddParams.freq);
+                        }
+                        break;
+#endif
                         default:
 
                             break;
@@ -4599,6 +4933,7 @@ void cme_Thread(void* apParam)
                 }
                 break;
 
+#ifndef TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_CONFIGURE_PEER_AGING_TIMEOUT:
                 {
                     uint32_t peerAgingTimeout = msg.un.peerAgingTimeout;
@@ -4636,7 +4971,9 @@ void cme_Thread(void* apParam)
                     }
                 }
                 break;
+#endif
 
+#ifndef TI_STA_ONLY_BUILD
                 case CME_MESSAGE_ID_PEER_AGING_SAMPLE_TIME:
                 {
                     RoleType_e RoleType = ROLE_AP;
@@ -4707,6 +5044,7 @@ void cme_Thread(void* apParam)
                     }
                 }
                 break;
+#endif
                 case CME_MESSAGE_ID_SET_VENDOR_ELEMETS:
                 {
                     int32_t roleId;
@@ -4741,6 +5079,7 @@ void cme_Thread(void* apParam)
                     }
 
                     ////////// AP role
+#ifndef TI_STA_ONLY_BUILD
                     if(msg.un.vendorElements.roleType == ROLE_AP)
                     {
                         struct wpa_supplicant *wpa_s = pDrv->ctx;
@@ -4781,6 +5120,7 @@ void cme_Thread(void* apParam)
                         }
                         hapd->conf->assocresp_elements = buf;//will be freed by the supplicant
                     }
+#endif
                     ////////// STA role
                     else//STA
                     {
@@ -5087,7 +5427,7 @@ int32_t cme_init()
     rc = osi_ThreadCreate(&gCmeThreadTcb,                   // Thread control block
                          "cme",                            // Thread name
                           CME_THR_STACK_SIZE,               // Stack size
-                          CME_THRD_PRIORITY,                 // Thread priority
+                          CME_THREAD_PRIORITY,                 // Thread priority
                           cme_Thread,                       // Thread entry function
                           NULL);                             // Thread init parameters
 

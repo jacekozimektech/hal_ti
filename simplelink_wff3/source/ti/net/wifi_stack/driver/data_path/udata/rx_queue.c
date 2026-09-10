@@ -482,8 +482,11 @@ static void RxQueue_CloseBaSession(uint8_t uTid, uint8_t uHlid, Bool_e bNotifyFw
 
         if (bNotifyFw)
         {
-            /* Config FW to tear down ba session */
-            RxQueue_CfgRxBaPolicy(pTidDataBase, uHlid, uTid, BA_SESSION_SETUP_CLEAR);
+            /* Config FW to tear down ba session (skip if link already closed) */
+            if (pRxData->aRxLinkInfo[uHlid].eState != LINK_STATE_CLOSED)
+            {
+                RxQueue_CfgRxBaPolicy(pTidDataBase, uHlid, uTid, BA_SESSION_SETUP_CLEAR);
+            }
         }
 
         /* Pass all valid entries at the array */
@@ -1702,6 +1705,16 @@ void RxQueue_ReceivePacket(uint8_t * pBuffer, uint32_t len)
                     BLOCK_ACK_PRINT_REPORT_ERROR ("\r\nRxQueue_ReceivePacket: Received ADDBA frame for Hlid: %d, uControlledLink: %d, Tid %d. uBAParameterField: 0x%x Session already established.\r\n",
                             uFrameHlid, uControlledLink, uFrameTid, uBAParameterField);
                     RxQueue_SendDELBA(DOT11_DELBA_REASON_CODE_UNSPECIFIED, uFrameTid, uControlledLink);
+                    RxQueue_PassPacket (RX_DESC_HOST_STATUS_FAIL, pBuffer);
+
+                    return;
+                }
+
+                /* Link is closed (peer removed), discard packet without sending response */
+                if (pRxData->aRxLinkInfo[uControlledLink].eState == LINK_STATE_CLOSED)
+                {
+                    BLOCK_ACK_PRINT_REPORT_ERROR ("\r\nRxQueue_ReceivePacket: BA event (ADDBA) - Link closed, discarding.\r\n");
+
                     RxQueue_PassPacket (RX_DESC_HOST_STATUS_FAIL, pBuffer);
 
                     return;

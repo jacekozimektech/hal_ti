@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2026, Texas Instruments Incorporated
+ * Copyright (c) 2022-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -120,10 +120,13 @@ extern "C" {
 /*! Resource ID: UARTLIN 2 */
 #define PowerWFF3_PERIPH_UARTLIN2 14
 
+/*! Resource ID: PDM */
+#define PowerWFF3_PERIPH_PDM 15
+
 /* \cond */
 /* Number of resources in database.
  */
-#define PowerWFF3_NUMRESOURCES 15
+#define PowerWFF3_NUMRESOURCES 16
 /* \endcond */
 
 #define PowerWFF3_SLEEP   0x1 /*!< The SLEEP state */

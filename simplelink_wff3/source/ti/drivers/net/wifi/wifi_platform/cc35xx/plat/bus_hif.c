@@ -34,7 +34,7 @@
 
 #include <bus_if.h>
 #include "nab.h"
-#include "dma_channel_usage.h"
+#define HIF_DMA_CHANNEL 11
 #include "fw_status.h"
 #include "hif.h"
 #include "macro_utils.h"
@@ -47,7 +47,7 @@
 typedef struct{
     uint32_t dmaChannel;
 }WBUS_HIF_DB_STRCT;
-WBUS_HIF_DB_STRCT wbus_hif_db = {.dmaChannel = HOSTDMA_DRIVER_CH_HIF};
+WBUS_HIF_DB_STRCT wbus_hif_db = {.dmaChannel = HIF_DMA_CHANNEL};
 
 #define CORE_AON_HOST_BASE                                   (0x41C00000)
 #define CORE_AON_REGS_O_NAB_HINT_STATUS_CLR_ON_RD            (0x000000B0)
@@ -178,6 +178,7 @@ int bus_sendInitCommand(uint32_t config, uint8_t fbrw)
 
      return 0;
  }
+
 // Sends a  Write command
 int bus_sendWriteCommand(uint32_t address, uint8_t *data, uint32_t length, uint8_t isFixed)
 {

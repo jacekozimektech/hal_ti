@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2025, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -57,11 +57,12 @@
     #include DeviceFamily_constructPath(inc/hw_ints.h)
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23XX) && (ENABLE_KEY_STORAGE == 1))
-    #error "Key storage is not supported for CC23XX"
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) && (ENABLE_KEY_STORAGE == 1))
+    #error "Key storage is not supported for CC23X0"
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /* Using LPF3 driver implementation for WFF3, since the HSM IP is the same. */
     #if (ENABLE_KEY_STORAGE == 1)
         /* These includes must come before hsmddk/include/Integration/Adapter_PSA includes */
@@ -69,6 +70,10 @@
         #include <ti/drivers/cryptoutils/cryptokey/CryptoKeyKeyStore_PSA_helpers.h>
     #endif
     #include <ti/drivers/cryptoutils/hsm/HSMXXF3.h>
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        #include <ti/drivers/xmem/XMEMWFF3.h>
+        #include <ti/drivers/utils/Math.h>
+    #endif
     #include <ti/drivers/cryptoutils/hsm/HSMXXF3Utility.h>
     #include <third_party/hsmddk/include/Integration/Adapter_VEX/incl/adapter_vex.h>
     #include <third_party/hsmddk/include/Integration/Adapter_PSA/incl/adapter_psa_asset.h>
@@ -152,7 +157,8 @@ static void AESCCMXXF3_processTagCTR(AESCCMXXF3_Object *object);
 static int_fast16_t AESCCMXXF3_waitForDMA(const AESCCMXXF3_Object *object);
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     #if (ENABLE_KEY_STORAGE == 1)
 static int_fast16_t AESCCMXXF3HSM_getKeyMaterial(AESCCMXXF3_Object *object);
     #endif
@@ -160,6 +166,9 @@ static void AESCCMXXF3HSM_setupObjectMetaData(AESCCMXXF3_Object *object);
 static int_fast16_t AESCCMXXF3HSM_oneStepOperation(AESCCM_Handle handle,
                                                    AESCCM_OneStepOperation *operation,
                                                    AESCCM_OperationType operationType);
+static int_fast16_t AESCCMXXF3HSM_oneStepOperationInternal(AESCCM_Handle handle,
+                                                           AESCCM_OneStepOperation *operation,
+                                                           AESCCM_OperationType operationType);
 static int_fast16_t AESCCMXXF3HSM_performHSMOperation(AESCCM_Handle handle);
 static void AESCCMXXF3HSM_postProcessingCommon(AESCCM_Handle handle, int_fast16_t status, int8_t tokenResult);
 static int_fast16_t AESCCMXXF3HSM_setupSegmentedOperation(AESCCM_Handle handle,
@@ -427,7 +436,8 @@ static int_fast16_t AESCCMXXF3_waitForDMA(const AESCCMXXF3_Object *object)
  */
 void AESCCM_init(void)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     HSMXXF3_constructRTOSObjects();
 #endif
 #if (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX)
@@ -453,7 +463,8 @@ AESCCM_Handle AESCCM_construct(AESCCM_Config *config, const AESCCM_Params *param
     }
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     /* Initialize and boot HSM */
     if (HSMXXF3_init() != HSMXXF3_STATUS_SUCCESS)
     {
@@ -538,15 +549,35 @@ static void AESCCMXXF3_processCBCMACFinalBlock(const uint8_t *input, size_t byte
     /* Must wait until engine is idle before clearing BUF */
     while (AESGetStatus() != (uint32_t)AES_STA_STATE_IDLE) {}
 
+    /* When the CPU pushes data in a cipher mode that has the WRBUF3
+     * configuration set during initialization code, the engine shows IDLE state
+     * for one clock cycle before starting the next operation. If the state is
+     * sampled at this exact moment and then issue clear, the engine is already
+     * processing - so the clear operation gets ignored. To prevent this race,
+     * poll idle twice in a row to confirm the engine truly halted before
+     * proceeding with the clear.
+     */
+    while (AESGetStatus() != (uint32_t)AES_STA_STATE_IDLE) {}
+
+    /* Clear the WRBUF3 configuration and do a manual trigger instead since it
+     * is unknown how many bytes will be copied to the BUF register.
+     * Store the current configuration to restore it later.
+     */
+    uint32_t autoCfg = HWREG(AES_BASE + AES_O_AUTOCFG);
+    AESSetAUTOCFG(autoCfg & ~AES_AUTOCFG_TRGAES_M);
+
     /* Zero out the BUF registers */
     AESClearBUF();
 
-    /* Copy directly to BUF registers. (void)memcpy is safe to use here since the
-     * order of the writes is not important when writing a partial block.
+    /* Copy directly to BUF registers. (void)memcpy is safe to use here since
+     * the order of the writes is not important when writing a partial block.
      */
     (void)memcpy((void *)(AES_BASE + AES_O_BUF0), input, bytesRemaining);
 
     AESSetTrigger((uint32_t)AES_TRG_AESOP_TXTXBUF);
+
+    /* Restore the configuration */
+    AESSetAUTOCFG(autoCfg);
 }
 
     #define M_PRIME_OFFSET 3
@@ -1046,7 +1077,8 @@ int_fast16_t AESCCM_oneStepEncrypt(AESCCM_Handle handle, AESCCM_OneStepOperation
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((operation->key->encoding == CryptoKey_PLAINTEXT_HSM) ||
             (operation->key->encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -1074,7 +1106,8 @@ int_fast16_t AESCCM_oneStepDecrypt(AESCCM_Handle handle, AESCCM_OneStepOperation
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((operation->key->encoding == CryptoKey_PLAINTEXT_HSM) ||
             (operation->key->encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -1143,7 +1176,8 @@ int_fast16_t AESCCM_setupEncrypt(AESCCM_Handle handle,
     DebugP_assert(handle);
     int_fast16_t status = AES_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         return AESCCMXXF3HSM_setupEncrypt(handle, key, totalAADLength, totalPlaintextLength, macLength);
@@ -1176,7 +1210,8 @@ int_fast16_t AESCCM_setupDecrypt(AESCCM_Handle handle,
 
     int_fast16_t status = AES_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         return AESCCMXXF3HSM_setupDecrypt(handle, key, totalAADLength, totalPlaintextLength, macLength);
@@ -1230,7 +1265,8 @@ int_fast16_t AESCCM_setLengths(AESCCM_Handle handle, size_t aadLength, size_t pl
     object->totalCTRLengthRemaining    = plaintextLength;
     object->macLength                  = (uint8_t)macLength;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     object->aadBytesProcessed        = 0U;
     object->bufferedAADLength        = 0U;
     object->totalAADLengthRemaining  = aadLength;
@@ -1657,7 +1693,8 @@ int_fast16_t AESCCM_addAAD(AESCCM_Handle handle, AESCCM_SegmentedAADOperation *o
     AESCCMXXF3_Object *object = AESCCMXXF3_getObject(handle);
     int_fast16_t status       = AES_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -1988,7 +2025,8 @@ int_fast16_t AESCCM_addData(AESCCM_Handle handle, AESCCM_SegmentedDataOperation 
     }
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -2035,7 +2073,7 @@ int_fast16_t AESCCM_addData(AESCCM_Handle handle, AESCCM_SegmentedDataOperation 
      * All AAD input must be processed at this point.
      */
     if ((object->aadBytesProcessed != object->totalAADLength)
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
         && ((object->common.key.encoding == CryptoKey_PLAINTEXT) || (object->common.key.encoding == CryptoKey_KEYSTORE))
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
         && (object->common.key.encoding == CryptoKey_KEYSTORE)
@@ -2074,7 +2112,8 @@ int_fast16_t AESCCM_addData(AESCCM_Handle handle, AESCCM_SegmentedDataOperation 
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
             (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -2110,7 +2149,8 @@ int_fast16_t AESCCM_finalizeEncrypt(AESCCM_Handle handle, AESCCM_SegmentedFinali
     AESCCMXXF3_Object *object = AESCCMXXF3_getObject(handle);
     int_fast16_t status       = AES_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -2182,7 +2222,8 @@ int_fast16_t AESCCM_finalizeDecrypt(AESCCM_Handle handle, AESCCM_SegmentedFinali
     AESCCMXXF3_Object *object = AESCCMXXF3_getObject(handle);
     int_fast16_t status       = AESCCM_STATUS_FEATURE_NOT_SUPPORTED;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -2319,7 +2360,8 @@ int_fast16_t AESCCM_cancelOperation(AESCCM_Handle handle)
      * Do not execute the callback as it would have been executed already
      * when the operation completed.
      */
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if (((object->common.key.encoding & CRYPTOKEY_HSM) == 0) && (!object->common.operationInProgress))
 #else
     if (!object->common.operationInProgress)
@@ -2338,7 +2380,8 @@ int_fast16_t AESCCM_cancelOperation(AESCCM_Handle handle)
         AESCommonXXF3_cancelOperation(&object->common, true);
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         /* Since the HSM cannot cancel an in-progress token, we must wait for the result to allow for
          * subsequent token submissions to succeed.
          */
@@ -2382,7 +2425,8 @@ int_fast16_t AESCCM_cancelOperation(AESCCM_Handle handle)
     return status;
 }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
 /*
  *  ======== AESCCMXXF3HSM_setMac ========
@@ -3059,10 +3103,475 @@ static int_fast16_t AESCCMXXF3HSM_performHSMOperation(AESCCM_Handle handle)
 
 /*
  *  ======== AESCCMXXF3HSM_oneStepOperation ========
+ *
+ *  On CC35XX, splits the operation into bounce-buffer-sized chunks when AAD or
+ *  payload data exceeds the PSRAM bounce slot, then reassembles output and MAC.
+ *  Uses the saveIV/loadIV + tempAssetID state mechanism to preserve the CBC-MAC
+ *  across chunk boundaries. CALLBACK mode is not supported for chunked operations.
+ *  On other targets, delegates directly to oneStepOperationInternal.
  */
 static int_fast16_t AESCCMXXF3HSM_oneStepOperation(AESCCM_Handle handle,
                                                    AESCCM_OneStepOperation *operation,
                                                    AESCCM_OperationType operationType)
+{
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    bool aadIsExternal   = (operation->aad != NULL) && XMEMWFF3_isAddrExternal((uintptr_t)operation->aad);
+    bool inputIsExternal = (operation->input != NULL) && XMEMWFF3_isAddrExternal((uintptr_t)operation->input);
+
+    /* Block-aligned maximum chunk sizes for each bounce slot. */
+    size_t inputBounceSize  = inputIsExternal ? HSMXXF3_inputBounce.size : SIZE_MAX;
+    size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)operation->output) ? HSMXXF3_outputBounce.size
+                                                                                    : SIZE_MAX;
+    size_t maxPayloadChunk  = Math_MIN(inputBounceSize, outputBounceSize) & ~(AES_BLOCK_SIZE - 1U);
+    size_t maxAADChunk      = HSMXXF3_auxBounce.size & ~(AES_BLOCK_SIZE - 1U);
+
+    bool needsPayloadChunking = inputIsExternal && (operation->inputLength > maxPayloadChunk) && (maxPayloadChunk > 0U);
+    bool needsAADChunking     = aadIsExternal && (operation->aadLength > maxAADChunk) && (maxAADChunk > 0U);
+
+    if (!needsPayloadChunking && !needsAADChunking)
+    {
+        /* Single-token path: bounce buffers are large enough for the full operation. */
+        return AESCCMXXF3HSM_oneStepOperationInternal(handle, operation, operationType);
+    }
+
+    AESCCMXXF3_Object *object = AESCCMXXF3_getObject(handle);
+
+    if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+    {
+        return AESCCM_STATUS_FEATURE_NOT_SUPPORTED;
+    }
+
+    /*
+     * Multi-chunk path.  We drive the existing saveIV/loadIV + tempAssetID
+     * machinery by temporarily changing operationType and operation pointer
+     * for each intermediate submit, then restoring ONE_STEP for the final
+     * chunk so postProcessingCommon extracts the MAC correctly.
+     *
+     * The object fields totalAADLength / totalDataLength never change; only
+     * the *Remaining counters move, exactly as they would during a real
+     * segmented operation.  setupObjectMetaData reads these to decide
+     * saveIV/loadIV, so the HSM sees the correct state machine.
+     */
+
+    /* --- Validate and initialise the object, same as oneStepOperationInternal --- */
+    DebugP_assert(handle);
+    DebugP_assert(operation);
+    DebugP_assert(operation->key);
+    DebugP_assert(!operation->nonceInternallyGenerated);
+    DebugP_assert(operation->nonce && (operation->nonceLength >= 7U) && (operation->nonceLength <= 13U));
+    DebugP_assert((operation->aad && (operation->aadLength > 0U)) ||
+                  (operation->input && (operation->inputLength > 0U)));
+    DebugP_assert(operation->mac && (operation->macLength <= 16U));
+    DebugP_assert(operation->aadLength <= B1_AAD_LENGTH_SMALL_LIMIT);
+
+    if ((operation->nonceLength < (uint8_t)7U) || (operation->nonceLength > (uint8_t)13U))
+    {
+        return AESCCM_STATUS_ERROR;
+    }
+    if (object->hsmStatus != HSMXXF3_STATUS_SUCCESS)
+    {
+        return AESCCM_STATUS_ERROR;
+    }
+    if ((operation->aadLength + operation->inputLength) == 0U)
+    {
+        return AESCCM_STATUS_ERROR;
+    }
+    if (object->segmentedOperationInProgress)
+    {
+        return AESCCM_STATUS_ERROR;
+    }
+
+    object->common.returnStatus = AESCCM_STATUS_SUCCESS;
+    object->operation           = (AESCCM_OperationUnion *)operation;
+    object->operationType       = operationType;
+    object->common.key          = *(operation->key);
+    object->input               = operation->input;
+    object->output              = operation->output;
+    object->mac                 = operation->mac;
+    object->aad                 = operation->aad;
+    object->nonce               = operation->nonce;
+    object->inputLength         = operation->inputLength;
+    object->totalDataLength     = operation->inputLength;
+    object->macLength           = operation->macLength;
+    object->aadLength           = operation->aadLength;
+    object->totalAADLength      = operation->aadLength;
+    object->nonceLength         = operation->nonceLength;
+
+    object->totalDataLengthRemaining = object->totalDataLength;
+    object->totalAADLengthRemaining  = object->totalAADLength;
+    object->tempAssetID              = 0U;
+
+    if ((operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) && (operation->macLength == 0U))
+    {
+        object->macLength = HSM_MAC_MAX_LENGTH;
+    }
+
+    if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+    {
+        return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+    }
+
+    int_fast16_t status = AESCCM_STATUS_SUCCESS;
+
+    /* A temp asset is always needed when chunking because intermediate chunks
+     * use saveIV/loadIV to carry the CBC-MAC state across token boundaries.
+     */
+    status = AESCCMXXF3HSM_createTempAssetID(handle);
+
+        #if (ENABLE_KEY_STORAGE == 1)
+    if (status == AESCCM_STATUS_SUCCESS)
+    {
+        status = AESCCMXXF3HSM_getKeyMaterial(object);
+    }
+        #endif
+
+    if (status != AESCCM_STATUS_SUCCESS)
+    {
+        (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+        HSMXXF3_releaseLock();
+        return status;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* AAD phase: submit AAD in bounce-buffer-sized chunks via raw token  */
+    /* submission, using the AAD_ENCRYPT/AAD_DECRYPT operationType so     */
+    /* that setupObjectMetaData drives the saveIV/loadIV state machine.   */
+    /*                                                                     */
+    /* setupObjectMetaData(AAD_ENCRYPT) buffers the last block of each    */
+    /* final AAD chunk into aadFinalBlock so that it can be submitted with*/
+    /* the following DATA token.  We stop the AAD loop before the last    */
+    /* chunk and leave totalAADLengthRemaining non-zero so that the DATA  */
+    /* phase picks up the buffered tail.  If there is no payload, we also */
+    /* skip the last AAD chunk in this loop and let performHSMOperation   */
+    /* submit it as the final ONE_STEP token.                             */
+    /* ------------------------------------------------------------------ */
+    if (operation->aadLength > 0U)
+    {
+        AESCCM_SegmentedAADOperation aadOp;
+        const uint8_t *aadPtr = operation->aad;
+        size_t aadRemaining   = operation->aadLength;
+
+        /* Submit all intermediate AAD chunks that won't fit in the bounce
+         * buffer.  Stop when aadRemaining fits, so the last chunk can be
+         * deferred to the DATA (or final ONE_STEP) token.
+         */
+        while (aadRemaining > HSMXXF3_auxBounce.size)
+        {
+            aadOp.aad       = (uint8_t *)aadPtr;
+            aadOp.aadLength = maxAADChunk;
+
+            object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_AAD_ENCRYPT
+                                                                                      : AESCCM_OP_TYPE_AAD_DECRYPT;
+            object->operation     = (AESCCM_OperationUnion *)&aadOp;
+            object->aad           = aadPtr;
+            object->aadLength     = maxAADChunk;
+            object->input         = NULL;
+            object->output        = NULL;
+            object->inputLength   = 0U;
+
+            /* setupObjectMetaData may buffer the last AES block of this chunk
+             * into aadFinalBlock.  Because aadRemaining > auxBounce > maxAADChunk
+             * here, operation->aadLength != totalAADLengthRemaining, so no
+             * buffering occurs for non-final chunks.
+             */
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+
+            /* Due to errata SYS_211, acquire CommonResource lock before each
+             * token submission, same as performHSMOperation does.
+             */
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            /* Use POLLING for intermediate tokens — avoids interrupt-state
+             * side-effects with a NULL callback for BLOCKING-mode callers.
+             * Same pattern as createTempAssetID / freeTempAssetID.
+             */
+            int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+            if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                hsmRetval = HSMXXF3_waitForResult();
+            }
+
+            CommonResourceXXF3_releaseLock();
+
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_ERROR;
+            }
+
+            object->totalAADLengthRemaining -= maxAADChunk;
+
+            aadPtr += maxAADChunk;
+            aadRemaining -= maxAADChunk;
+        }
+
+        /* aadRemaining now fits in the bounce buffer (≤ auxBounce).
+         *
+         * Run setupObjectMetaData(AAD_ENCRYPT) for this last chunk and submit
+         * the token.  setupObjectMetaData buffers the trailing bytes that must
+         * travel with the first DATA token into aadFinalBlock / bufferedAADLength
+         * and reduces object->aadLength accordingly.  After the token returns we
+         * decrement totalAADLengthRemaining only by the amount actually submitted,
+         * leaving bufferedAADLength in totalAADLengthRemaining so that the DATA
+         * phase sees it > 0 and includes the buffered tail.
+         *
+         * For the no-payload case, the last AAD chunk is left for
+         * performHSMOperation (ONE_STEP) so that postProcessingCommon runs and
+         * extracts the MAC.
+         */
+        if (operation->inputLength > 0U)
+        {
+            aadOp.aad       = (uint8_t *)aadPtr;
+            aadOp.aadLength = aadRemaining;
+
+            object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_AAD_ENCRYPT
+                                                                                      : AESCCM_OP_TYPE_AAD_DECRYPT;
+            object->operation     = (AESCCM_OperationUnion *)&aadOp;
+            object->aad           = aadPtr;
+            object->aadLength     = aadRemaining;
+            object->input         = NULL;
+            object->output        = NULL;
+            object->inputLength   = 0U;
+
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+            /* object->aadLength is now the amount to submit (may be < aadRemaining
+             * if setupObjectMetaData buffered the tail into aadFinalBlock).
+             */
+            size_t submittedAAD = object->aadLength;
+
+            if (submittedAAD > 0U)
+            {
+                if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+                {
+                    (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                    HSMXXF3_releaseLock();
+                    return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+                }
+
+                int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+                if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+                {
+                    hsmRetval = HSMXXF3_waitForResult();
+                }
+
+                CommonResourceXXF3_releaseLock();
+
+                if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+                {
+                    (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                    HSMXXF3_releaseLock();
+                    return AESCCM_STATUS_ERROR;
+                }
+            }
+
+            /* Decrement by the amount submitted.  The remainder (bufferedAADLength)
+             * stays in totalAADLengthRemaining so DATA tokens include it.
+             */
+            object->totalAADLengthRemaining -= submittedAAD;
+        }
+        else
+        {
+            /* No payload: leave the remaining AAD in object->aad / aadLength so
+             * performHSMOperation (ONE_STEP) submits it as the final token and
+             * postProcessingCommon extracts the MAC.
+             */
+            object->aad       = aadPtr;
+            object->aadLength = aadRemaining;
+        }
+
+        object->operationType = operationType;
+        object->operation     = (AESCCM_OperationUnion *)operation;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Payload phase: submit block-aligned intermediate payload chunks;    */
+    /* the final chunk (which may include remaining AAD) goes through      */
+    /* performHSMOperation so postProcessingCommon extracts the MAC.       */
+    /* ------------------------------------------------------------------ */
+    if (operation->inputLength > 0U)
+    {
+        AESCCM_SegmentedDataOperation dataOp;
+        uint8_t *inputPtr    = (uint8_t *)operation->input;
+        uint8_t *outputPtr   = (uint8_t *)operation->output;
+        size_t dataRemaining = operation->inputLength;
+
+        while (dataRemaining > maxPayloadChunk)
+        {
+            dataOp.input       = inputPtr;
+            dataOp.output      = outputPtr;
+            dataOp.inputLength = (uint32_t)maxPayloadChunk;
+
+            object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_DATA_ENCRYPT
+                                                                                      : AESCCM_OP_TYPE_DATA_DECRYPT;
+            object->operation     = (AESCCM_OperationUnion *)&dataOp;
+            object->input         = inputPtr;
+            object->output        = outputPtr;
+            object->inputLength   = maxPayloadChunk;
+            /* AAD was fully submitted during the AAD phase; clear for data tokens. */
+            object->aad           = NULL;
+            object->aadLength     = 0U;
+
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+            if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                hsmRetval = HSMXXF3_waitForResult();
+            }
+
+            CommonResourceXXF3_releaseLock();
+
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_ERROR;
+            }
+
+            object->totalDataLengthRemaining -= maxPayloadChunk;
+            /* The buffered AAD tail (if any) was included in this chunk's token;
+             * clear totalAADLengthRemaining so subsequent chunks do not repeat it.
+             */
+            object->totalAADLengthRemaining = 0U;
+            object->bufferedAADLength       = 0U;
+
+            inputPtr += maxPayloadChunk;
+            outputPtr += maxPayloadChunk;
+            dataRemaining -= maxPayloadChunk;
+        }
+
+        /* Final payload chunk: use FINALIZE operationType so setupObjectMetaData
+         * sets loadIV=true (CBC-MAC state was saved by intermediate tokens) and
+         * postProcessingCommon extracts the MAC.  ONE_STEP would not set loadIV
+         * and would also overwrite W[25]/W[9] with the full original AAD, causing
+         * the HSM to try to DMA from the original AAD address again.
+         */
+        AESCCM_SegmentedFinalizeOperation finalizeOp;
+        finalizeOp.input       = inputPtr;
+        finalizeOp.output      = outputPtr;
+        finalizeOp.inputLength = (uint32_t)dataRemaining;
+        finalizeOp.mac         = operation->mac;
+        finalizeOp.macLength   = operation->macLength;
+
+        object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_FINALIZE_ENCRYPT
+                                                                                  : AESCCM_OP_TYPE_FINALIZE_DECRYPT;
+        object->operation     = (AESCCM_OperationUnion *)&finalizeOp;
+
+        status = AESCCMXXF3HSM_performHSMOperation(handle);
+    }
+    else
+    {
+        /* AAD-only operation (no payload, only chunked AAD in PSRAM).
+         * All intermediate AAD chunks were submitted above.  The remaining
+         * AAD (aadRemaining ≤ auxBounce) was not yet submitted — manually
+         * split it into the block-aligned portion and the tail (which
+         * setupObjectMetaData(FINALIZE) will pick up from aadFinalBlock via
+         * totalAADLengthRemaining > 0).
+         */
+        const uint8_t *aadPtr  = operation->aad + (operation->aadLength - object->totalAADLengthRemaining);
+        size_t aadRemaining    = object->totalAADLengthRemaining;
+        size_t blockAlignedAAD = aadRemaining & ~(AES_BLOCK_SIZE - 1U);
+        size_t tailLen         = aadRemaining - blockAlignedAAD;
+
+        if (blockAlignedAAD >= AES_BLOCK_SIZE)
+        {
+            /* Reserve the last full block for aadFinalBlock so the FINALIZE
+             * token carries it as the per-spec "last AAD block" alongside the
+             * zero-length payload.
+             */
+            blockAlignedAAD -= AES_BLOCK_SIZE;
+            tailLen = AES_BLOCK_SIZE;
+        }
+
+        (void)memset(object->aadFinalBlock, 0, AES_BLOCK_SIZE);
+        (void)memcpy(object->aadFinalBlock, aadPtr + blockAlignedAAD, tailLen);
+        object->bufferedAADLength = tailLen;
+
+        /* Submit the block-aligned AAD prefix if any (no FINALIZE yet). */
+        if (blockAlignedAAD > 0U)
+        {
+            AESCCM_SegmentedAADOperation aadOp;
+            aadOp.aad       = (uint8_t *)aadPtr;
+            aadOp.aadLength = blockAlignedAAD;
+
+            object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_AAD_ENCRYPT
+                                                                                      : AESCCM_OP_TYPE_AAD_DECRYPT;
+            object->operation     = (AESCCM_OperationUnion *)&aadOp;
+            object->aad           = aadPtr;
+            object->aadLength     = blockAlignedAAD;
+            object->input         = NULL;
+            object->output        = NULL;
+            object->inputLength   = 0U;
+
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+            if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                hsmRetval = HSMXXF3_waitForResult();
+            }
+
+            CommonResourceXXF3_releaseLock();
+
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_ERROR;
+            }
+
+            object->totalAADLengthRemaining -= blockAlignedAAD;
+        }
+
+        /* FINALIZE with zero-length payload: setupObjectMetaData picks up
+         * aadFinalBlock (tailLen bytes) via totalAADLengthRemaining > 0.
+         */
+        AESCCM_SegmentedFinalizeOperation finalizeOp;
+        finalizeOp.input       = NULL;
+        finalizeOp.output      = NULL;
+        finalizeOp.inputLength = 0U;
+        finalizeOp.mac         = operation->mac;
+        finalizeOp.macLength   = operation->macLength;
+
+        object->operationType = (operationType == AESCCM_OP_TYPE_ONESTEP_ENCRYPT) ? AESCCM_OP_TYPE_FINALIZE_ENCRYPT
+                                                                                  : AESCCM_OP_TYPE_FINALIZE_DECRYPT;
+        object->operation     = (AESCCM_OperationUnion *)&finalizeOp;
+
+        status = AESCCMXXF3HSM_performHSMOperation(handle);
+    }
+
+    return status;
+    #else
+    return AESCCMXXF3HSM_oneStepOperationInternal(handle, operation, operationType);
+    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX */
+}
+
+/*
+ *  ======== AESCCMXXF3HSM_oneStepOperationInternal ========
+ */
+static int_fast16_t AESCCMXXF3HSM_oneStepOperationInternal(AESCCM_Handle handle,
+                                                           AESCCM_OneStepOperation *operation,
+                                                           AESCCM_OperationType operationType)
 {
     DebugP_assert(handle);
     DebugP_assert(operation);
@@ -3298,6 +3807,40 @@ int_fast16_t AESCCMXXF3HSM_setupDecrypt(AESCCM_Handle handle,
                                                  macLength);
 }
 
+    /*
+     *  ======== AESCCMXXF3HSM_submitAADTail ========
+     *
+     *  Submits a single AAD chunk that fits within the aux bounce buffer.
+     *  Called with the HSMXXF3 lock already held. Handles the small final-block
+     *  buffering path and the normal performHSMOperation path.
+     *  Only used on CC35XX where the chunked AAD path needs this helper.
+     */
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+static int_fast16_t AESCCMXXF3HSM_submitAADTail(AESCCM_Handle handle, AESCCM_SegmentedAADOperation *operation)
+{
+    AESCCMXXF3_Object *object = AESCCMXXF3_getObject(handle);
+
+    if ((operation->aadLength <= AES_BLOCK_SIZE) && (operation->aadLength == object->totalAADLengthRemaining))
+    {
+        (void)memcpy(&object->aadFinalBlock[0], operation->aad, operation->aadLength);
+        object->bufferedAADLength = operation->aadLength;
+
+        object->common.returnStatus = AESCCM_STATUS_SUCCESS;
+
+        HSMXXF3_releaseLock();
+
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            object->callbackFxn(handle, object->common.returnStatus, object->operation, object->operationType);
+        }
+
+        return AESCCM_STATUS_SUCCESS;
+    }
+
+    return AESCCMXXF3HSM_performHSMOperation(handle);
+}
+    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX */
+
 /*
  *  ======== AESCCMXXF3HSM_addAAD ========
  */
@@ -3343,6 +3886,86 @@ int_fast16_t AESCCMXXF3HSM_addAAD(AESCCM_Handle handle, AESCCM_SegmentedAADOpera
 
     object->operationType = operationType;
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When the caller's AAD segment is in PSRAM and exceeds the aux bounce
+     * buffer, split it into bounce-buffer-sized intermediate tokens here
+     * before submitting the remaining tail via AESCCMXXF3HSM_submitAADTail.
+     */
+    size_t maxAADChunk = HSMXXF3_auxBounce.size & ~(AES_BLOCK_SIZE - 1U);
+
+    if (XMEMWFF3_isAddrExternal((uintptr_t)operation->aad) && (operation->aadLength > HSMXXF3_auxBounce.size) &&
+        (maxAADChunk > 0U))
+    {
+        /* Callback mode is not supported for chunked operations because each
+         * intermediate token submission would fire a separate callback.
+         */
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return AESCCM_STATUS_FEATURE_NOT_SUPPORTED;
+        }
+
+        if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+        {
+            return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+        }
+
+        AESCCM_SegmentedAADOperation aadOp;
+        const uint8_t *aadPtr = operation->aad;
+        size_t aadRemaining   = operation->aadLength;
+
+        while (aadRemaining > HSMXXF3_auxBounce.size)
+        {
+            aadOp.aad       = (uint8_t *)aadPtr;
+            aadOp.aadLength = maxAADChunk;
+
+            object->operation   = (AESCCM_OperationUnion *)&aadOp;
+            object->aad         = aadPtr;
+            object->aadLength   = maxAADChunk;
+            object->input       = NULL;
+            object->output      = NULL;
+            object->inputLength = 0U;
+
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+            if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                hsmRetval = HSMXXF3_waitForResult();
+            }
+
+            CommonResourceXXF3_releaseLock();
+
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_ERROR;
+            }
+
+            object->totalAADLengthRemaining -= maxAADChunk;
+            aadPtr += maxAADChunk;
+            aadRemaining -= maxAADChunk;
+        }
+
+        aadOp.aad         = (uint8_t *)aadPtr;
+        aadOp.aadLength   = aadRemaining;
+        object->operation = (AESCCM_OperationUnion *)&aadOp;
+
+        /* Lock already held — submit remaining tail directly. */
+        return AESCCMXXF3HSM_submitAADTail(handle, &aadOp);
+    }
+    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX */
+
+    /* Check for small-block buffering path before acquiring the lock, matching
+     * original behavior where no lock was needed for this path on CC27XX.
+     */
     if ((operation->aadLength <= AES_BLOCK_SIZE) && (operation->aadLength == object->totalAADLengthRemaining))
     {
         (void)memcpy(&object->aadFinalBlock[0], operation->aad, operation->aadLength);
@@ -3383,6 +4006,99 @@ static int_fast16_t AESCCMXXF3HSM_addData(AESCCM_Handle handle,
 
     object->operationType = operationType;
     object->operation     = operation;
+
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* When the caller's payload segment is in PSRAM and exceeds the bounce
+     * buffers, split it into bounce-buffer-sized intermediate tokens here
+     * before the final chunk falls through to performHSMOperation below.
+     */
+    AESCCM_SegmentedDataOperation *dataOp = (AESCCM_SegmentedDataOperation *)operation;
+    size_t inputBounceSize  = XMEMWFF3_isAddrExternal((uintptr_t)dataOp->input) ? HSMXXF3_inputBounce.size : SIZE_MAX;
+    size_t outputBounceSize = XMEMWFF3_isAddrExternal((uintptr_t)dataOp->output) ? HSMXXF3_outputBounce.size : SIZE_MAX;
+    size_t maxPayloadChunk  = Math_MIN(inputBounceSize, outputBounceSize) & ~(AES_BLOCK_SIZE - 1U);
+
+    if ((dataOp->input != NULL) && XMEMWFF3_isAddrExternal((uintptr_t)dataOp->input) &&
+        (dataOp->inputLength > maxPayloadChunk) && (maxPayloadChunk > 0U))
+    {
+        /* Callback mode is not supported for chunked operations because each
+         * intermediate token submission would fire a separate callback.
+         */
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            return AESCCM_STATUS_FEATURE_NOT_SUPPORTED;
+        }
+
+        if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
+        {
+            return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+        }
+
+        AESCCM_SegmentedDataOperation chunkOp;
+        uint8_t *inputPtr    = (uint8_t *)dataOp->input;
+        uint8_t *outputPtr   = (uint8_t *)dataOp->output;
+        size_t dataRemaining = dataOp->inputLength;
+
+        while (dataRemaining > maxPayloadChunk)
+        {
+            chunkOp.input       = inputPtr;
+            chunkOp.output      = outputPtr;
+            chunkOp.inputLength = (uint32_t)maxPayloadChunk;
+
+            object->operation   = (AESCCM_OperationUnion *)&chunkOp;
+            object->input       = inputPtr;
+            object->output      = outputPtr;
+            object->inputLength = maxPayloadChunk;
+            /* AAD was fully submitted before this call; clear for data tokens. */
+            object->aad         = NULL;
+            object->aadLength   = 0U;
+
+            AESCCMXXF3HSM_setupObjectMetaData(object);
+
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            int_fast16_t hsmRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING, NULL, (uintptr_t)handle);
+            if (hsmRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                hsmRetval = HSMXXF3_waitForResult();
+            }
+
+            CommonResourceXXF3_releaseLock();
+
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS || ((HSMXXF3_getResultCode() & HSMXXF3_RETVAL_MASK) != 0))
+            {
+                (void)AESCCMXXF3HSM_freeTempAssetID(handle);
+                HSMXXF3_releaseLock();
+                return AESCCM_STATUS_ERROR;
+            }
+
+            object->totalDataLengthRemaining -= maxPayloadChunk;
+            /* The buffered AAD tail (if any) was included in this chunk's token;
+             * clear totalAADLengthRemaining so subsequent chunks do not repeat it.
+             */
+            object->totalAADLengthRemaining = 0U;
+            object->bufferedAADLength       = 0U;
+
+            inputPtr += maxPayloadChunk;
+            outputPtr += maxPayloadChunk;
+            dataRemaining -= maxPayloadChunk;
+        }
+
+        /* Point the operation at the remaining tail and fall through to
+         * performHSMOperation with the lock already held.
+         */
+        chunkOp.input       = inputPtr;
+        chunkOp.output      = outputPtr;
+        chunkOp.inputLength = (uint32_t)dataRemaining;
+        object->operation   = (AESCCM_OperationUnion *)&chunkOp;
+
+        return AESCCMXXF3HSM_performHSMOperation(handle);
+    }
+    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX */
 
     if (!HSMXXF3_acquireLock(object->common.semaphoreTimeout, (uintptr_t)handle))
     {

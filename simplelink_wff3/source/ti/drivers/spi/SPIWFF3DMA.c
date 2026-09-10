@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -86,41 +86,41 @@ bool SPIWFF3DMA_transfer(SPI_Handle handle, SPI_Transaction *transaction);
 void SPIWFF3DMA_transferCancel(SPI_Handle handle);
 
 /* Local Function Prototypes */
-static void blockingTransferCallback(SPI_Handle handle, SPI_Transaction *msg);
-static void configNextTransfer(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
-static void startDmaTransaction(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
-static void csnCallback(uint_least8_t);
-static void flushFifos(SPIWFF3DMA_HWAttrs const *hwAttrs);
-static bool initHw(SPI_Handle handle);
-static void initIO(SPI_Handle handle);
-static void finalizeIO(SPI_Handle handle);
-static void setIOSleepState(SPI_Handle handle);
-static inline void primeTransfer(SPI_Handle handle);
-static inline void releaseConstraint(uint32_t txBufAddr);
-static inline void setConstraint(uint32_t txBufAddr);
-static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transaction);
-static int spiPostNotify(unsigned int eventType, uintptr_t eventArg, uintptr_t clientArg);
-static inline bool spiBusy(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
-static inline void disableSPI(uint32_t baseAddr);
-static inline void enableSPI(SPI_Handle handle);
-static inline bool isSPIEnabled(SPI_Handle handle);
-static inline void enableInterrupt(uint32_t baseAddr, uint32_t irqs);
-static inline void disableInterrupt(uint32_t baseAddr, uint32_t irqs);
-static inline void clearInterrupt(uint32_t baseAddr, uint32_t irqs);
-static void initDMA(SPI_Handle handle);
-static void enableDMA(uint32_t baseAddr, uint32_t dmaFlags);
-static void disableDMA(uint32_t baseAddr, uint32_t dmaFlags);
-static inline uint32_t getInterruptStatus(uint32_t baseAddr, bool masked);
-static bool configSPI(uint32_t baseAddr,
-                      uint32_t freq,
-                      uint32_t format,
-                      uint32_t mode,
-                      uint32_t bitRate,
-                      uint32_t dataSize,
-                      uint32_t dsample);
-static int32_t dataPutNonBlocking(uint32_t baseAddr, uint32_t frame);
-static void dataGet(uint32_t baseAddr, uint32_t *frame);
-static bool isSPIbusy(uint32_t baseAddr);
+static void SPIWFF3DMA_blockingTransferCallback(SPI_Handle handle, SPI_Transaction *msg);
+static void SPIWFF3DMA_configNextTransfer(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
+static void SPIWFF3DMA_startDmaTransaction(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
+static void SPIWFF3DMA_csnCallback(uint_least8_t);
+static void SPIWFF3DMA_flushFifos(SPIWFF3DMA_HWAttrs const *hwAttrs);
+static bool SPIWFF3DMA_initHw(SPI_Handle handle);
+static void SPIWFF3DMA_initIO(SPI_Handle handle);
+static void SPIWFF3DMA_finalizeIO(SPI_Handle handle);
+static void SPIWFF3DMA_setIOSleepState(SPI_Handle handle);
+static inline void SPIWFF3DMA_primeTransfer(SPI_Handle handle);
+static inline void SPIWFF3DMA_releaseConstraint(uint32_t txBufAddr);
+static inline void SPIWFF3DMA_setConstraint(uint32_t txBufAddr);
+static inline void SPIWFF3DMA_spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transaction);
+static int SPIWFF3DMA_spiPostNotify(unsigned int eventType, uintptr_t eventArg, uintptr_t clientArg);
+static inline bool SPIWFF3DMA_spiBusy(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs);
+static inline void SPIWFF3DMA_disableSPI(uint32_t baseAddr);
+static inline void SPIWFF3DMA_enableSPI(SPI_Handle handle);
+static inline bool SPIWFF3DMA_isSPIEnabled(SPI_Handle handle);
+static inline void SPIWFF3DMA_enableInterrupt(uint32_t baseAddr, uint32_t irqs);
+static inline void SPIWFF3DMA_disableInterrupt(uint32_t baseAddr, uint32_t irqs);
+static inline void SPIWFF3DMA_clearInterrupt(uint32_t baseAddr, uint32_t irqs);
+static void SPIWFF3DMA_initDMA(SPI_Handle handle);
+static void SPIWFF3DMA_enableDMA(uint32_t baseAddr, uint32_t dmaFlags);
+static void SPIWFF3DMA_disableDMA(uint32_t baseAddr, uint32_t dmaFlags);
+static inline uint32_t SPIWFF3DMA_getInterruptStatus(uint32_t baseAddr, bool masked);
+static bool SPIWFF3DMA_configSPI(uint32_t baseAddr,
+                                 uint32_t freq,
+                                 uint32_t format,
+                                 uint32_t mode,
+                                 uint32_t bitRate,
+                                 uint32_t dataSize,
+                                 uint32_t dsample);
+static int32_t SPIWFF3DMA_dataPutNonBlocking(uint32_t baseAddr, uint32_t frame);
+static void SPIWFF3DMA_dataGet(uint32_t baseAddr, uint32_t *frame);
+static bool SPIWFF3DMA_isSPIBusy(uint32_t baseAddr);
 
 /* RX FIFO over flowed, data was lost */
 #define SPI_INT_RXOF   (SPI_MIS_RXOVF_SET)
@@ -186,7 +186,7 @@ void SPIWFF3DMA_close(SPI_Handle handle)
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
 
     /* Disable the SPI */
-    disableSPI(hwAttrs->baseAddr);
+    SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
 
     HwiP_destruct(&(object->hwi));
 
@@ -197,7 +197,7 @@ void SPIWFF3DMA_close(SPI_Handle handle)
         SemaphoreP_destruct(&(object->transferComplete));
     }
 
-    finalizeIO(handle);
+    SPIWFF3DMA_finalizeIO(handle);
 
     Power_releaseDependency(hwAttrs->powerID);
 
@@ -314,8 +314,8 @@ int_fast16_t SPIWFF3DMA_control(SPI_Handle handle, uint_fast16_t cmd, void *arg)
         case SPIWFF3DMA_CMD_MANUAL_START:
             if (object->headPtr != NULL && object->manualStart)
             {
-                enableSPI(handle);
-                startDmaTransaction(object, hwAttrs);
+                SPIWFF3DMA_enableSPI(handle);
+                SPIWFF3DMA_startDmaTransaction(object, hwAttrs);
                 ret = SPI_STATUS_SUCCESS;
             }
             break;
@@ -343,9 +343,9 @@ int_fast16_t SPIWFF3DMA_control(SPI_Handle handle, uint_fast16_t cmd, void *arg)
     return (ret);
 }
 
-static void startDmaTransaction(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
+static void SPIWFF3DMA_startDmaTransaction(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
 {
-    enableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
+    SPIWFF3DMA_enableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
 
     DMAWFF3_startTransaction(hwAttrs->rxDmaChannel,
                              object->dmaRxSrcAddr,
@@ -372,8 +372,8 @@ static void SPIWFF3DMA_hwiFxn(uintptr_t arg)
     SPIWFF3DMA_HWAttrs const *hwAttrs = ((SPI_Handle)arg)->hwAttrs;
     uintptr_t key;
 
-    intStatus = getInterruptStatus(hwAttrs->baseAddr, true);
-    clearInterrupt(hwAttrs->baseAddr, intStatus);
+    intStatus = SPIWFF3DMA_getInterruptStatus(hwAttrs->baseAddr, true);
+    SPIWFF3DMA_clearInterrupt(hwAttrs->baseAddr, intStatus);
 
     if (intStatus & SPI_MIS_RXOVF_SET)
     {
@@ -389,19 +389,19 @@ static void SPIWFF3DMA_hwiFxn(uintptr_t arg)
         }
         else
         {
-            disableSPI(hwAttrs->baseAddr);
+            SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
 
             /* Disable DMA and clear DMA interrupts */
-            disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
+            SPIWFF3DMA_disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
             DMAWFF3_disableChannel(hwAttrs->rxDmaChannel);
             DMAWFF3_disableChannel(hwAttrs->txDmaChannel);
             DMAWFF3_clearInterrupt(1 << hwAttrs->txDmaChannel | 1 << hwAttrs->rxDmaChannel);
 
-            disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
-            clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+            SPIWFF3DMA_disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+            SPIWFF3DMA_clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
 
             /* Clear out the FIFO by resetting SPI module and re-initting */
-            flushFifos(hwAttrs);
+            SPIWFF3DMA_flushFifos(hwAttrs);
         }
     }
     else
@@ -414,7 +414,7 @@ static void SPIWFF3DMA_hwiFxn(uintptr_t arg)
             DMAWFF3_getRemainingBytes(hwAttrs->rxDmaChannel) == 0 && object->framesQueued == object->headPtr->count &&
             object->headPtr->nextPtr == NULL)
         {
-            disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN);
+            SPIWFF3DMA_disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN);
             DMAWFF3_clearInterrupt(1 << hwAttrs->txDmaChannel);
         }
 
@@ -429,13 +429,13 @@ static void SPIWFF3DMA_hwiFxn(uintptr_t arg)
             {
                 /*
                  * In this case we need to reconfigure the channel to
-                 * continue transferring frames. configNextTransfer() will
+                 * continue transferring frames. SPIWFF3DMA_configNextTransfer() will
                  * continue queueing frames for the current transfer and
                  * start the next transaction.
                  */
 
-                configNextTransfer(object, hwAttrs);
-                startDmaTransaction(object, hwAttrs);
+                SPIWFF3DMA_configNextTransfer(object, hwAttrs);
+                SPIWFF3DMA_startDmaTransaction(object, hwAttrs);
             }
             else
             {
@@ -490,13 +490,13 @@ static void SPIWFF3DMA_hwiFxn(uintptr_t arg)
 
                 if (object->headPtr != NULL)
                 {
-                    configNextTransfer(object, hwAttrs);
-                    startDmaTransaction(object, hwAttrs);
+                    SPIWFF3DMA_configNextTransfer(object, hwAttrs);
+                    SPIWFF3DMA_startDmaTransaction(object, hwAttrs);
                 }
                 else
                 {
                     /* No more queued transfers; disable DMA & SPI */
-                    disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
+                    SPIWFF3DMA_disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
 
                     /*
                      * For this driver implementation the peripheral is kept
@@ -578,7 +578,7 @@ SPI_Handle SPIWFF3DMA_open(SPI_Handle handle, SPI_Params *params)
         object->dsample = 2 << SPI_CLKCFG1_DSAMPLE_S;
     }
 
-    initDMA(handle);
+    SPIWFF3DMA_initDMA(handle);
 
     /* Register power dependency - i.e. power up and enable clock for SPI. */
     Power_setDependency(hwAttrs->powerID);
@@ -587,7 +587,7 @@ SPI_Handle SPIWFF3DMA_open(SPI_Handle handle, SPI_Params *params)
      * Configure IOs after hardware has been initialized so that IOs aren't
      * toggled unnecessary
      */
-    if (!initHw(handle))
+    if (!SPIWFF3DMA_initHw(handle))
     {
         /*
          * Trying to use SPI driver when some other driver or application
@@ -605,11 +605,11 @@ SPI_Handle SPIWFF3DMA_open(SPI_Handle handle, SPI_Params *params)
     /*
      * IO configuration must occur before SPI IP is enabled
      * for peripheral mode.
-     * For controller mode see enableSPI().
+     * For controller mode see SPIWFF3DMA_enableSPI().
      */
     if (object->mode == SPI_PERIPHERAL)
     {
-        initIO(handle);
+        SPIWFF3DMA_initIO(handle);
     }
 
     HwiP_Params_init(&paramsUnion.hwiParams);
@@ -624,7 +624,7 @@ SPI_Handle SPIWFF3DMA_open(SPI_Handle handle, SPI_Params *params)
 
     Power_registerNotify(&object->spiPostObj,
                          PowerWFF3_AWAKE_SLEEP | PowerWFF3_ENTERING_SLEEP,
-                         (Power_NotifyFxn)spiPostNotify,
+                         (Power_NotifyFxn)SPIWFF3DMA_spiPostNotify,
                          (uint32_t)handle);
 
     if (object->transferMode == SPI_MODE_BLOCKING)
@@ -634,7 +634,7 @@ SPI_Handle SPIWFF3DMA_open(SPI_Handle handle, SPI_Params *params)
          * SPI transfer
          */
         SemaphoreP_constructBinary(&(object->transferComplete), 0);
-        object->transferCallbackFxn = blockingTransferCallback;
+        object->transferCallbackFxn = SPIWFF3DMA_blockingTransferCallback;
     }
     else
     {
@@ -670,7 +670,7 @@ static void SPIWFF3DMA_swiFxn(uintptr_t arg0, uintptr_t arg1)
         transaction->nextPtr = NULL;
 
         /* Transaction complete; release power constraints */
-        releaseConstraint((uint32_t)transaction->txBuf);
+        SPIWFF3DMA_releaseConstraint((uint32_t)transaction->txBuf);
 
         /* Inverted logic here to restore interrupts right before we jump to the callback function and disable them
          * after we return */
@@ -767,7 +767,7 @@ bool SPIWFF3DMA_transfer(SPI_Handle handle, SPI_Transaction *transaction)
     }
 
     /* Set constraints to guarantee transaction */
-    setConstraint((uint32_t)transaction->txBuf);
+    SPIWFF3DMA_setConstraint((uint32_t)transaction->txBuf);
 
     /*
      * Polling transfer if BLOCKING mode & transaction->count < threshold
@@ -780,10 +780,10 @@ bool SPIWFF3DMA_transfer(SPI_Handle handle, SPI_Transaction *transaction)
     {
         HwiP_restore(key);
 
-        spiPollingTransfer(handle, transaction);
+        SPIWFF3DMA_spiPollingTransfer(handle, transaction);
 
         /* Release constraint since transaction is done */
-        releaseConstraint((uint32_t)transaction->txBuf);
+        SPIWFF3DMA_releaseConstraint((uint32_t)transaction->txBuf);
 
         /* Transaction completed; set status & mark SPI ready */
         object->headPtr->status = SPI_TRANSFER_COMPLETED;
@@ -799,13 +799,13 @@ bool SPIWFF3DMA_transfer(SPI_Handle handle, SPI_Transaction *transaction)
          */
 
         /* Enable DMA interrupts */
-        clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
-        enableInterrupt(hwAttrs->baseAddr, SPI_MIS_DMATX_SET | SPI_MIS_DMARX_SET);
+        SPIWFF3DMA_clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+        SPIWFF3DMA_enableInterrupt(hwAttrs->baseAddr, SPI_MIS_DMATX_SET | SPI_MIS_DMARX_SET);
 
-        primeTransfer(handle);
+        SPIWFF3DMA_primeTransfer(handle);
 
         /* Enable the RX overrun interrupt in the SPI module */
-        enableInterrupt(hwAttrs->baseAddr, SPI_MIS_RXOVF_SET);
+        SPIWFF3DMA_enableInterrupt(hwAttrs->baseAddr, SPI_MIS_RXOVF_SET);
 
         HwiP_restore(key);
 
@@ -858,7 +858,7 @@ void SPIWFF3DMA_transferCancel(SPI_Handle handle)
          * machine is in a bad state. Calling SPI_transfer() will re-enable
          * the peripheral.
          */
-        disableSPI(hwAttrs->baseAddr);
+        SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
         HwiP_restore(key);
 
         return;
@@ -890,17 +890,17 @@ void SPIWFF3DMA_transferCancel(SPI_Handle handle)
              * Wait until the TX FIFO is empty; this is to make sure the
              * chip select is deasserted before disabling the SPI.
              */
-            while (isSPIbusy(hwAttrs->baseAddr)) {}
+            while (SPIWFF3DMA_isSPIBusy(hwAttrs->baseAddr)) {}
         }
 
-        disableSPI(hwAttrs->baseAddr);
+        SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
 
         /* Now disable the RX, DMA & interrupts */
         DMAWFF3_disableChannel(hwAttrs->rxDmaChannel);
-        disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
+        SPIWFF3DMA_disableDMA(hwAttrs->baseAddr, SPI_DMACR_TXEN | SPI_DMACR_RXEN);
         DMAWFF3_clearInterrupt(1 << hwAttrs->txDmaChannel | 1 << hwAttrs->rxDmaChannel);
-        disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
-        clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+        SPIWFF3DMA_disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+        SPIWFF3DMA_clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
 
         /*
          * Update transaction->count with the amount of frames which have
@@ -922,7 +922,7 @@ void SPIWFF3DMA_transferCancel(SPI_Handle handle)
          * Disables peripheral, clears all registers & reinitializes it to
          * parameters used in SPI_open()
          */
-        initHw(handle);
+        SPIWFF3DMA_initHw(handle);
 
         HwiP_clearInterrupt(hwAttrs->intNum);
 
@@ -1005,19 +1005,19 @@ void SPIWFF3DMA_transferCancel(SPI_Handle handle)
 }
 
 /*
- *  ======== blockingTransferCallback ========
+ *  ======== SPIWFF3DMA_blockingTransferCallback ========
  */
-static void blockingTransferCallback(SPI_Handle handle, SPI_Transaction *msg)
+static void SPIWFF3DMA_blockingTransferCallback(SPI_Handle handle, SPI_Transaction *msg)
 {
     SPIWFF3DMA_Object *object = handle->object;
     SemaphoreP_post(&(object->transferComplete));
 }
 
 /*
- *  ======== configNextTransfer ========
+ *  ======== SPIWFF3DMA_configNextTransfer ========
  *  This function must be executed with interrupts disabled.
  */
-static void configNextTransfer(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
+static void SPIWFF3DMA_configNextTransfer(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
 {
     size_t framesQueued;
     SPI_Transaction *transaction;
@@ -1128,11 +1128,11 @@ static void configNextTransfer(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs con
 }
 
 /*
- *  ======== csnCallback ========
+ *  ======== SPIWFF3DMA_csnCallback ========
  *  Peripheral mode optional callback function for when the CS is asserted &
  *  deasserted.
  */
-static void csnCallback(uint_least8_t index)
+static void SPIWFF3DMA_csnCallback(uint_least8_t index)
 {
     uintptr_t key;
     SPI_Handle spiHandle      = (SPI_Handle)GPIO_getUserArg(index);
@@ -1177,12 +1177,12 @@ static void csnCallback(uint_least8_t index)
 }
 
 /*
- *  ======== flushFifos ========
+ *  ======== SPIWFF3DMA_flushFifos ========
  */
-static void flushFifos(SPIWFF3DMA_HWAttrs const *hwAttrs)
+static void SPIWFF3DMA_flushFifos(SPIWFF3DMA_HWAttrs const *hwAttrs)
 {
     /* Disable the SPI in case it isn't already */
-    disableSPI(hwAttrs->baseAddr);
+    SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
 
     /* Trigger Fifo reset */
     HWREG(SPI0_BASE + SPI_O_CTL0) |= SPI_CTL0_FIFORST_RST_TRIG;
@@ -1191,23 +1191,23 @@ static void flushFifos(SPIWFF3DMA_HWAttrs const *hwAttrs)
 }
 
 /*
- *  ======== initHw ========
+ *  ======== SPIWFF3DMA_initHw ========
  */
-static bool initHw(SPI_Handle handle)
+static bool SPIWFF3DMA_initHw(SPI_Handle handle)
 {
     ClockP_FreqHz freq                = {0, 0};
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
     uint32_t format;
 
-    flushFifos(hwAttrs);
+    SPIWFF3DMA_flushFifos(hwAttrs);
 
     /* Disable SSI operation */
-    disableSPI(hwAttrs->baseAddr);
+    SPIWFF3DMA_disableSPI(hwAttrs->baseAddr);
 
     /* Disable SPI module interrupts */
-    disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
-    clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+    SPIWFF3DMA_disableInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
+    SPIWFF3DMA_clearInterrupt(hwAttrs->baseAddr, SPI_INT_ALL);
 
     /* Get requested format */
     format = frameFormat[object->format];
@@ -1225,28 +1225,33 @@ static bool initHw(SPI_Handle handle)
     /* Set the SPI configuration */
     ClockP_getCpuFreq(&freq);
 
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+    /* On CC35XX, the SPI reference clock is half of CPU CLK (SOC CLK = 80 MHz) */
+    freq.lo /= 2;
+#endif
+
     if (freq.lo / 2 >= object->bitRate)
     {
-        configSPI(hwAttrs->baseAddr,
-                  freq.lo,
-                  format,
-                  mode[object->mode],
-                  object->bitRate,
-                  object->dataSize,
-                  object->dsample);
+        SPIWFF3DMA_configSPI(hwAttrs->baseAddr,
+                             freq.lo,
+                             format,
+                             mode[object->mode],
+                             object->bitRate,
+                             object->dataSize,
+                             object->dsample);
         return true;
     }
     return false;
 }
 
 /*
- *  ======== initIO ========
+ *  ======== SPIWFF3DMA_initIO ========
  *  This functions initializes the SPI IOs.
  *
  *  @pre    Function assumes that the SPI handle is pointing to a hardware
  *          module which has already been opened.
  */
-static void initIO(SPI_Handle handle)
+static void SPIWFF3DMA_initIO(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
@@ -1259,7 +1264,7 @@ static void initIO(SPI_Handle handle)
         GPIO_setConfigAndMux(object->csnPin, GPIO_CFG_INPUT, hwAttrs->csnPinMux);
 
         /* In peripheral mode, enable WU from STDBY on CSN */
-        GPIO_setCallback(object->csnPin, csnCallback);
+        GPIO_setCallback(object->csnPin, SPIWFF3DMA_csnCallback);
         GPIO_setUserArg(object->csnPin, handle);
     }
     else
@@ -1272,10 +1277,10 @@ static void initIO(SPI_Handle handle)
 }
 
 /*
- *  ======== finalizeIO ========
+ *  ======== SPIWFF3DMA_finalizeIO ========
  *  This function releases the SPI IOs.
  */
-static void finalizeIO(SPI_Handle handle)
+static void SPIWFF3DMA_finalizeIO(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
@@ -1292,10 +1297,10 @@ static void finalizeIO(SPI_Handle handle)
 }
 
 /*
- *  ======== setIOSleepState ========
+ *  ======== SPIWFF3DMA_setIOSleepState ========
  *  This function releases the SPI IOs and resets pins back to initial user and GPIO Configurations.
  */
-static void setIOSleepState(SPI_Handle handle)
+static void SPIWFF3DMA_setIOSleepState(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
@@ -1328,10 +1333,10 @@ static void setIOSleepState(SPI_Handle handle)
 }
 
 /*
- *  ======== primeTransfer ========
+ *  ======== SPIWFF3DMA_primeTransfer ========
  *  Function must be executed with interrupts disabled.
  */
-static inline void primeTransfer(SPI_Handle handle)
+static inline void SPIWFF3DMA_primeTransfer(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
@@ -1349,12 +1354,12 @@ static inline void primeTransfer(SPI_Handle handle)
         HwiP_enableInterrupt(hwAttrs->intNum);
 
         /* Configure RX & TX DMA transfers */
-        configNextTransfer(object, hwAttrs);
+        SPIWFF3DMA_configNextTransfer(object, hwAttrs);
 
         if (!object->manualStart)
         {
-            enableSPI(handle);
-            startDmaTransaction(object, hwAttrs);
+            SPIWFF3DMA_enableSPI(handle);
+            SPIWFF3DMA_startDmaTransaction(object, hwAttrs);
         }
     }
     else // (object->transferSize != 0)
@@ -1368,27 +1373,27 @@ static inline void primeTransfer(SPI_Handle handle)
 }
 
 /*
- *  ======== releaseConstraint ========
+ *  ======== SPIWFF3DMA_releaseConstraint ========
  */
-static inline void releaseConstraint(uint32_t txBufAddr)
+static inline void SPIWFF3DMA_releaseConstraint(uint32_t txBufAddr)
 {
     /* Release standby constraint since operation is done. */
     Power_releaseConstraint(PowerWFF3_DISALLOW_SLEEP);
 }
 
 /*
- *  ======== setConstraint ========
+ *  ======== SPIWFF3DMA_setConstraint ========
  */
-static inline void setConstraint(uint32_t txBufAddr)
+static inline void SPIWFF3DMA_setConstraint(uint32_t txBufAddr)
 {
     /* Set constraints to guarantee operation */
     Power_setConstraint(PowerWFF3_DISALLOW_SLEEP);
 }
 
 /*
- *  ======== spiPollingTransfer ========
+ *  ======== SPIWFF3DMA_spiPollingTransfer ========
  */
-static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transaction)
+static inline void SPIWFF3DMA_spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transaction)
 {
     uint8_t txIncrement, rxIncrement;
     uint32_t dummyBuffer;
@@ -1439,7 +1444,7 @@ static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transa
     rxCount = transaction->count;
     txCount = rxCount;
 
-    enableSPI(handle);
+    SPIWFF3DMA_enableSPI(handle);
 
     /* Fill the TX FIFO as much as we can before reading */
     while (rxCount--)
@@ -1449,14 +1454,14 @@ static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transa
             put = true;
             while (txCount > 0 && put)
             {
-                put = dataPutNonBlocking(hwAttrs->baseAddr, *((uint8_t *)txBuf));
+                put = SPIWFF3DMA_dataPutNonBlocking(hwAttrs->baseAddr, *((uint8_t *)txBuf));
                 if (put)
                 {
                     txBuf = (void *)(((uint32_t)txBuf) + txIncrement);
                     txCount--;
                 }
             }
-            dataGet(hwAttrs->baseAddr, &dummyBuffer);
+            SPIWFF3DMA_dataGet(hwAttrs->baseAddr, &dummyBuffer);
             *((uint8_t *)rxBuf) = (uint8_t)dummyBuffer;
         }
         else
@@ -1464,14 +1469,14 @@ static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transa
             put = true;
             while (txCount > 0 && put)
             {
-                put = dataPutNonBlocking(hwAttrs->baseAddr, *((uint16_t *)txBuf));
+                put = SPIWFF3DMA_dataPutNonBlocking(hwAttrs->baseAddr, *((uint16_t *)txBuf));
                 if (put)
                 {
                     txBuf = (void *)(((uint32_t)txBuf) + txIncrement);
                     txCount--;
                 }
             }
-            dataGet(hwAttrs->baseAddr, &dummyBuffer);
+            SPIWFF3DMA_dataGet(hwAttrs->baseAddr, &dummyBuffer);
             *((uint16_t *)rxBuf) = (uint16_t)dummyBuffer;
         }
 
@@ -1479,13 +1484,13 @@ static inline void spiPollingTransfer(SPI_Handle handle, SPI_Transaction *transa
         rxBuf = (void *)(((uint32_t)rxBuf) + rxIncrement);
     }
 
-    while (spiBusy(object, hwAttrs)) {}
+    while (SPIWFF3DMA_spiBusy(object, hwAttrs)) {}
 }
 
 /*
- *  ======== spiPostNotify ========
+ *  ======== SPIWFF3DMA_spiPostNotify ========
  */
-static int spiPostNotify(unsigned int eventType, uintptr_t eventArg, uintptr_t clientArg)
+static int SPIWFF3DMA_spiPostNotify(unsigned int eventType, uintptr_t eventArg, uintptr_t clientArg)
 {
     SPI_Handle handle                 = (SPI_Handle)clientArg;
     SPIWFF3DMA_Object *object         = handle->object;
@@ -1511,29 +1516,29 @@ static int spiPostNotify(unsigned int eventType, uintptr_t eventArg, uintptr_t c
         DMAWFF3_configureChannel(hwAttrs->txDmaChannel, SPI_TX_DMA_BLOCK_SIZE, dmaWordSize, SPI_TX_DMA_CONTROL_OPTS);
 
         /* Initialize SPI hardware. */
-        initHw((SPI_Handle)clientArg);
+        SPIWFF3DMA_initHw((SPI_Handle)clientArg);
 
         /* If SPI hardware in peripheral mode, initialize required GPIOs. */
         if (object->mode == SPI_PERIPHERAL)
         {
-            initIO(handle);
+            SPIWFF3DMA_initIO(handle);
         }
     }
     else if (eventType == PowerWFF3_ENTERING_SLEEP)
     {
         /* Set the SPI IO back to default state before entering STDBY */
-        setIOSleepState(handle);
+        SPIWFF3DMA_setIOSleepState(handle);
     }
 
     return (Power_NOTIFYDONE);
 }
 
 /*
- *  ======== spiBusy ========
+ *  ======== SPIWFF3DMA_spiBusy ========
  *  HW is busy when in controller mode and BSY bit is set, or when in peripheral mode
  *  and TFE bit is not set.
  */
-static inline bool spiBusy(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
+static inline bool SPIWFF3DMA_spiBusy(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *hwAttrs)
 {
     bool registerBit = (bool)(HWREG(hwAttrs->baseAddr + SPI_O_STA) & (object->busyBit));
     if (object->busyBit == SPI_STA_BUSY_ACTIVE)
@@ -1547,25 +1552,25 @@ static inline bool spiBusy(SPIWFF3DMA_Object *object, SPIWFF3DMA_HWAttrs const *
 }
 
 /*
- *  ======== disableSPI ========
+ *  ======== SPIWFF3DMA_disableSPI ========
  *  Disables the SPI peripheral
  */
-static inline void disableSPI(uint32_t baseAddr)
+static inline void SPIWFF3DMA_disableSPI(uint32_t baseAddr)
 {
     HWREG(baseAddr + SPI_O_CTL1) &= ~SPI_CTL1_EN_ENABLE;
 }
 
 /*
- *  ======== enableSPI ========
+ *  ======== SPIWFF3DMA_enableSPI ========
  *  Enables the SPI peripheral and performs IO muxing as necessary
  */
-static inline void enableSPI(SPI_Handle handle)
+static inline void SPIWFF3DMA_enableSPI(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
     uint32_t baseAddr                 = hwAttrs->baseAddr;
 
-    if (!isSPIEnabled(handle))
+    if (!SPIWFF3DMA_isSPIEnabled(handle))
     {
         HWREG(baseAddr + SPI_O_CTL1) |= SPI_CTL1_EN_ENABLE;
         if (object->mode == SPI_CONTROLLER)
@@ -1574,26 +1579,26 @@ static inline void enableSPI(SPI_Handle handle)
              * IO mux needs to occur after SPI IP is enabled
              * to produce correct signal state.
              */
-            initIO(handle);
+            SPIWFF3DMA_initIO(handle);
         }
     }
 }
 
 /*
- *  ======== isSPIEnabled ========
+ *  ======== SPIWFF3DMA_isSPIEnabled ========
  *  Returns the SPI Peripheral State
  */
-static inline bool isSPIEnabled(SPI_Handle handle)
+static inline bool SPIWFF3DMA_isSPIEnabled(SPI_Handle handle)
 {
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
     return (HWREG(hwAttrs->baseAddr + SPI_O_CTL1) & SPI_CTL1_EN_ENABLE) != 0;
 }
 
 /*
- *  ======== getInterruptStatus ========
+ *  ======== SPIWFF3DMA_getInterruptStatus ========
  *  Return the masked interrupt status
  */
-static inline uint32_t getInterruptStatus(uint32_t baseAddr, bool masked)
+static inline uint32_t SPIWFF3DMA_getInterruptStatus(uint32_t baseAddr, bool masked)
 {
     /* Return either the interrupt status or the raw interrupt status as
     requested. */
@@ -1608,37 +1613,37 @@ static inline uint32_t getInterruptStatus(uint32_t baseAddr, bool masked)
 }
 
 /*
- *  ======== enableInterrupt ========
+ *  ======== SPIWFF3DMA_enableInterrupt ========
  *  Enables the SPI peripheral interrupt
  */
-static inline void enableInterrupt(uint32_t baseAddr, uint32_t irqs)
+static inline void SPIWFF3DMA_enableInterrupt(uint32_t baseAddr, uint32_t irqs)
 {
     HWREG(baseAddr + SPI_O_IMASK) |= irqs;
 }
 
 /*
- *  ======== disableInterrupt ========
+ *  ======== SPIWFF3DMA_disableInterrupt ========
  *  Disables the SPI peripheral interrupt
  */
-static inline void disableInterrupt(uint32_t baseAddr, uint32_t irqs)
+static inline void SPIWFF3DMA_disableInterrupt(uint32_t baseAddr, uint32_t irqs)
 {
     HWREG(baseAddr + SPI_O_IMASK) &= ~irqs;
 }
 
 /*
- *  ======== clearInterrupt ========
+ *  ======== SPIWFF3DMA_clearInterrupt ========
  *  Clears the specified SPI peripheral interrupts
  */
-static inline void clearInterrupt(uint32_t baseAddr, uint32_t irqs)
+static inline void SPIWFF3DMA_clearInterrupt(uint32_t baseAddr, uint32_t irqs)
 {
     HWREG(baseAddr + SPI_O_ICLR) = irqs;
 }
 
 /*
- * ======== initDMA ========
+ * ======== SPIWFF3DMA_initDMA ========
  * Intialize and configure the DMA peripheral
  */
-static void initDMA(SPI_Handle handle)
+static void SPIWFF3DMA_initDMA(SPI_Handle handle)
 {
     SPIWFF3DMA_Object *object         = handle->object;
     SPIWFF3DMA_HWAttrs const *hwAttrs = handle->hwAttrs;
@@ -1660,61 +1665,52 @@ static void initDMA(SPI_Handle handle)
 }
 
 /*
- *  ======== enableDMA ========
+ *  ======== SPIWFF3DMA_enableDMA ========
  *  Enable the SPI DMA peripheral
  */
-static void enableDMA(uint32_t baseAddr, uint32_t dmaFlags)
+static void SPIWFF3DMA_enableDMA(uint32_t baseAddr, uint32_t dmaFlags)
 {
     /* Set the requested bits in the SPI DMA control register. */
     HWREG(baseAddr + SPI_O_DMACR) |= dmaFlags;
 }
 
-static void disableDMA(uint32_t baseAddr, uint32_t dmaFlags)
+static void SPIWFF3DMA_disableDMA(uint32_t baseAddr, uint32_t dmaFlags)
 {
     /* Clear the requested bits in the SPI DMA control register. */
     HWREG(baseAddr + SPI_O_DMACR) &= ~dmaFlags;
 }
 
 /*
- *  ======== configSPI ========
+ *  ======== SPIWFF3DMA_configSPI ========
  *  Configures the peripheral settings
  */
-static bool configSPI(uint32_t baseAddr,
-                      uint32_t freq,
-                      uint32_t format,
-                      uint32_t mode,
-                      uint32_t bitRate,
-                      uint32_t dataSize,
-                      uint32_t dsample)
+static bool SPIWFF3DMA_configSPI(uint32_t baseAddr,
+                                 uint32_t freq,
+                                 uint32_t format,
+                                 uint32_t mode,
+                                 uint32_t bitRate,
+                                 uint32_t dataSize,
+                                 uint32_t dsample)
 {
     uint16_t scr;
     uint32_t ratio;
 
-    /* Get existing settings */
-    uint32_t reg  = HWREG(baseAddr + SPI_O_CTL0);
-    /* Create mask for settings to modify */
-    uint32_t mask = (SPI_CTL0_DSS_M | SPI_CTL0_FRF_M | SPI_CTL0_SPO_M | SPI_CTL0_SPH_M);
-
-    /* Convert and mask data size to HW register format */
-    dataSize                     = (SPI_CTL0_DSS_M & (dataSize - 1));
-    /* Apply updated register */
-    HWREG(baseAddr + SPI_O_CTL0) = (reg & ~mask) | format | dataSize;
-
-    /* Set controller/peripheral mode, MSB first */
-    HWREG(baseAddr + SPI_O_CTL1) = mode | SPI_CTL1_MSB_MSB;
-
-    /* Set IFLS to trigger interrupt when 1 byte or more is in the FIFO */
-    HWREG(baseAddr + SPI_O_IFLS) &= ~(SPI_IFLS_TXSEL_M | SPI_IFLS_RXSEL_M);
-    HWREG(baseAddr + SPI_O_IFLS) |= SPI_IFLS_TXSEL_LEVEL_1 | SPI_IFLS_RXSEL_M;
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+    /* CC35XX has a prescaler in CLKCFG0[2:0] which is by default set to
+     * divide by 1. The SCR math below takes PRESC = DIV_BY_1.
+     */
+    HWREG(baseAddr + SPI_O_CLKCFG0) = (HWREG(baseAddr + SPI_O_CLKCFG0) & ~SPI_CLKCFG0_PRESC_M) |
+                                       SPI_CLKCFG0_PRESC_DIV_BY_1;
+#endif
 
     /* Get existing settings */
-    reg = HWREG(baseAddr + SPI_O_CLKCFG1);
+    uint32_t reg = HWREG(baseAddr + SPI_O_CLKCFG1);
 
     /* Create a mask for settings to modify */
-    mask = (SPI_CLKCFG1_DSAMPLE_M | SPI_CLKCFG1_SCR_M);
+    uint32_t mask = (SPI_CLKCFG1_DSAMPLE_M | SPI_CLKCFG1_SCR_M);
 
-    /* Calculate scr variable */
-    ratio = freq / (2 * bitRate);
+    /* Calculate scr variable such that actual clock is always <= bitRate */
+    ratio = (freq + (2 * bitRate) - 1) / (2 * bitRate);
 
     if (ratio > 0 && ratio <= SERIAL_CLK_DIVIDER_MAX)
     {
@@ -1728,10 +1724,27 @@ static bool configSPI(uint32_t baseAddr,
     /* Set clock divider */
     HWREG(baseAddr + SPI_O_CLKCFG1) = (reg & ~mask) | dsample | scr;
 
+    /* Get existing settings */
+    reg  = HWREG(baseAddr + SPI_O_CTL0);
+    /* Create mask for settings to modify */
+    mask = (SPI_CTL0_DSS_M | SPI_CTL0_FRF_M | SPI_CTL0_SPO_M | SPI_CTL0_SPH_M);
+
+    /* Convert and mask data size to HW register format */
+    dataSize                     = (SPI_CTL0_DSS_M & (dataSize - 1));
+    /* Apply updated register */
+    HWREG(baseAddr + SPI_O_CTL0) = (reg & ~mask) | format | dataSize;
+
+    /* Set controller/peripheral mode, MSB first */
+    HWREG(baseAddr + SPI_O_CTL1) = mode | SPI_CTL1_MSB_MSB;
+
+    /* Set IFLS to trigger interrupt when 1 byte or more is in the FIFO */
+    HWREG(baseAddr + SPI_O_IFLS) &= ~(SPI_IFLS_TXSEL_M | SPI_IFLS_RXSEL_M);
+    HWREG(baseAddr + SPI_O_IFLS) |= SPI_IFLS_TXSEL_LEVEL_1 | SPI_IFLS_RXSEL_M;
+
     return (true);
 }
 
-static int32_t dataPutNonBlocking(uint32_t baseAddr, uint32_t frame)
+static int32_t SPIWFF3DMA_dataPutNonBlocking(uint32_t baseAddr, uint32_t frame)
 {
     /* Check for space to write. */
     if (HWREG(baseAddr + SPI_O_STA) & SPI_STA_TNF_NOT_FULL)
@@ -1746,7 +1759,7 @@ static int32_t dataPutNonBlocking(uint32_t baseAddr, uint32_t frame)
     }
 }
 
-static void dataGet(uint32_t baseAddr, uint32_t *frame)
+static void SPIWFF3DMA_dataGet(uint32_t baseAddr, uint32_t *frame)
 {
     /* Wait until there is data to be read. */
     while (HWREG(baseAddr + SPI_O_STA) & SPI_STA_RFE_EMPTY) {}
@@ -1755,7 +1768,7 @@ static void dataGet(uint32_t baseAddr, uint32_t *frame)
     *frame = HWREG(baseAddr + SPI_O_RXDATA);
 }
 
-static bool isSPIbusy(uint32_t baseAddr)
+static bool SPIWFF3DMA_isSPIBusy(uint32_t baseAddr)
 {
     /* Determine if the SPI is busy. */
     return ((HWREG(baseAddr + SPI_O_STA) & SPI_STA_BUSY) ? true : false);

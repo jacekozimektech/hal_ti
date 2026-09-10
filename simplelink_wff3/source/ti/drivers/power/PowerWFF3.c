@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2026, Texas Instruments Incorporated
+ * Copyright (c) 2022-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -61,6 +61,7 @@
 #include DeviceFamily_constructPath(inc/hw_gptimer.h)
 #include DeviceFamily_constructPath(inc/hw_i2c.h)
 #include DeviceFamily_constructPath(inc/hw_i2s.h)
+#include DeviceFamily_constructPath(inc/hw_pdm.h)
 #include DeviceFamily_constructPath(inc/hw_prcm_aon.h)
 #include DeviceFamily_constructPath(inc/hw_sdmmc.h)
 #include DeviceFamily_constructPath(inc/hw_spi.h)
@@ -152,6 +153,7 @@ static const uint32_t resourceClkEnRegs[PowerWFF3_NUMRESOURCES] = {
     SDIO_CARD_FN1_BASE + SDIO_CARD_FN1_O_CLKEN, /* PowerWFF3_PERIPH_SDIO */
     ADC_BASE + ADC_O_CLKCFG,                    /* PowerWFF3_PERIPH_ADC0 */
     UARTLIN2_BASE + UARTLIN_O_CLKCFG,           /* PowerWFF3_PERIPH_UARTLIN2 */
+    PDM_BASE + PDM_O_CLKCFG,                    /* PowerWFF3_PERIPH_PDM */
 };
 
 /* Keeps track of the configured Power policy. Power_idleFunc() will not run
@@ -540,8 +542,16 @@ int_fast16_t Power_releaseDependency(Power_Resource resourceId)
  */
 int_fast16_t Power_shutdown(uint_fast16_t shutdownState, uint_fast32_t shutdownTime)
 {
-    // TODO: Implement Power_shutdown for WFF3
-    return Power_SOK;
+    /* Entering shutdown is not supported on WFF3 */
+    return Power_EFAIL;
+}
+
+/*
+ *  ======== Power_reset ========
+ */
+void Power_reset(void)
+{
+    HWREG(PRCM_AON_BASE + PRCM_AON_O_RSTCTL) = PRCM_AON_RSTCTL_SOCAON_M;
 }
 
 /*

@@ -111,26 +111,26 @@ typedef struct
 } ConfigCountryCompressed_t;
 
 ConfigChanPattern_t rom_gConfigChanPatternsTable[BASIC_RULES_COUNT + CUSTOM_RULES_COUNT] = {
-   //Bnd Tx(US  JP  WW  CS  Dfs minCh MaxCh NumCh chanBitmap 		 Index Count   Bnd Tx   Dfs Num Channels:  
-    { 0,  { 30, 0 , 20, 0}, 0,   1,    11,    11, 0x000007ff }, //   0,    20 	 { 0,  20,  0,  11, 1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  0,  0,  0,  0,   },
-    { 0,  { 0 , 20, 20, 0}, 1,   12,   13,    2,  0x00001800 }, //   1,     1 	 { 0,  20,  1,  2,  12,  13,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 0,  { 0 , 20, 20, 0}, 1,   14,   14,    1,  0x00002000 }, //   2,     1 	 { 0,  20,  1,  1,  14,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 1,  { 23, 20, 20, 0}, 1,   36,   48,    4,  0x0000000f }, //   3,     1 	 { 1,  20,  1,  4,  36,  40,  44,  48,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 1,  { 23, 20, 20, 0}, 1,   52,   64,    4,  0x000000f0 }, //   4,   160 	 { 1,  20,  1,  4,  52,  56,  60,  64,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 1,  { 23, 23, 20, 0}, 1,   100,  144,   12, 0x000fff00 }, //   5,   127 	 { 1,  20,  1,  11, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,0,  0,  0,   },
-    { 1,  { 30, 23, 20, 0}, 1,   149,  161,   4,  0x00f00000 }, //   6,     1 	 { 1,  20,  1,  4,  149, 153, 157, 161, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 0,  { 0 , 20, 20, 0}, 0,   1,    13,    13, 0x00001fff }, //   7,   156 	 { 0,  20,  0,  13, 1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12, 13, 0,  0,   },
-    { 1,  { 23, 20, 20, 0}, 0,   36,   48,    4,  0x0000000f }, //   8,   160 	 { 1,  20,  0,  4,  36,  40,  44,  48,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 1,  { 30, 0 , 20, 0}, 0,   149,  161,   4,  0x00f00000 }, //   9,    85 	 { 1,  20,  0,  4,  149, 153, 157, 161, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 1,  { 30, 20, 20, 0}, 0,   165,  165,   1,  0x01000000 }, //  10,     1 	 { 1,  20,  0,  1,  165, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-    { 2,  { 23, 20, 20, 0}, 0,   184,  196,   4,  0x3c000000 }, //  11,     1 	 { 2,  20,  0,  4,  184, 188, 192, 196, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
-	{ 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  12,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  13,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  14,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  15,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  16,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  17,     0    { ************************************** CUSTOM *****************************************  },
-    { 0,  { 0 , 0 , 0 , 0}, 0,   0,    0,     0,  0x00000000 }, //  18,     0    { ************************************** CUSTOM *****************************************  },
+   //Bnd Tx(US  JP  WW  EU  XZ) Dfs minCh MaxCh NumCh chanBitmap 		 Index Count   Bnd Tx   Dfs Num Channels:
+    { 0,  { 30, 0 , 20, 20, 0}, 0,   1,    11,    11, 0x000007ff }, //   0,    20 	 { 0,  20,  0,  11, 1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  0,  0,  0,  0,   },
+    { 0,  { 0 , 20, 20, 20, 0}, 1,   12,   13,    2,  0x00001800 }, //   1,     1 	 { 0,  20,  1,  2,  12,  13,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 0,  { 0 , 20, 20,  0, 0}, 1,   14,   14,    1,  0x00002000 }, //   2,     1 	 { 0,  20,  1,  1,  14,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 1,  { 23, 20, 20, 23, 0}, 1,   36,   48,    4,  0x0000000f }, //   3,     1 	 { 1,  20,  1,  4,  36,  40,  44,  48,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 1,  { 23, 20, 20, 23, 0}, 1,   52,   64,    4,  0x000000f0 }, //   4,   160 	 { 1,  20,  1,  4,  52,  56,  60,  64,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 1,  { 23, 23, 20, 30, 0}, 1,   100,  144,   12, 0x000fff00 }, //   5,   127 	 { 1,  20,  1,  11, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,0,  0,  0,   },
+    { 1,  { 30, 23, 20,  0, 0}, 1,   149,  161,   4,  0x00f00000 }, //   6,     1 	 { 1,  20,  1,  4,  149, 153, 157, 161, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 0,  { 0 , 20, 20, 20, 0}, 0,   1,    13,    13, 0x00001fff }, //   7,   156 	 { 0,  20,  0,  13, 1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12, 13, 0,  0,   },
+    { 1,  { 23, 20, 20, 23, 0}, 0,   36,   48,    4,  0x0000000f }, //   8,   160 	 { 1,  20,  0,  4,  36,  40,  44,  48,  0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 1,  { 30, 0 , 20,  0, 0}, 0,   149,  161,   4,  0x00f00000 }, //   9,    85 	 { 1,  20,  0,  4,  149, 153, 157, 161, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 1,  { 30, 20, 20,  0, 0}, 0,   165,  165,   1,  0x01000000 }, //  10,     1 	 { 1,  20,  0,  1,  165, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+    { 2,  { 23, 20, 20,  0, 0}, 0,   184,  196,   4,  0x3c000000 }, //  11,     1 	 { 2,  20,  0,  4,  184, 188, 192, 196, 0,   0,   0,   0,   0,   0,   0,   0,  0,  0,  0,   },
+	{ 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  12,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  13,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  14,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  15,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  16,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  17,     0    { ************************************** CUSTOM *****************************************  },
+    { 0,  { 0 , 0 , 0 ,  0, 0}, 0,   0,    0,     0,  0x00000000 }, //  18,     0    { ************************************** CUSTOM *****************************************  },
 };
 
 const ConfigGroupChanPatterns_t rom_gConfigGroupChanPatternsTable[] = {
@@ -139,7 +139,7 @@ const ConfigGroupChanPatterns_t rom_gConfigGroupChanPatternsTable[] = {
     /*    1,    6 */    { 4, 				  {  7,  8,  4,  5 } },
     /*    2,    6 */    { 6, 				  {  0,  8,  4,  5,  6,  10 } },
 	/*    3,    4 */    { 6, 				  {  7,  8,  4,  5,  9,  10 } },
-	/*    3,    7 */    { CUSTOM_RULES_COUNT, {  12, 13, 14, 15, 16, 17, 18} },
+	/*    4,    7 */    { CUSTOM_RULES_COUNT, {  12, 13, 14, 15, 16, 17, 18} },
 };
 
 ConfigCountryCompressed_t rom_gConfigCountryCompressedTable[REG_DOMAIN_NUM_OF_REGIONS] = {
@@ -305,7 +305,7 @@ int32_t regulatoryDomain_Init(WlanRole_e roleType, uint8_t *pCountryCode, uint8_
 							   "is NULL, using WW country code (00)");
 		pCountryCode[0] = '0';
 		pCountryCode[1] = '0';
-		pCountryCode[2] = '\0';
+		pCountryCode[2] = 0x20;
 	}
 
 	ret = regulatoryDomain_SetCountry(pCountryCode);
@@ -447,9 +447,9 @@ void regulatoryDomain_UpdateChannelValidity(uint8_t uChannel, Bool32 updateFw)
 void regulatoryDomain_GetPowerCapability(powerCapability_t *pPowerCapability,
 										 uint8_t channel)
 {
-    uint8_t maxTxPower = 0;
+    int8_t maxTxPower = 0;
 
-	pPowerCapability->minTxPower = DBM_DIV_10_2_DBM(MIN_TX_POWER);
+	pPowerCapability->minTxPower = WLAN_MIN_TX_POWER_DBM;
 
 	if (TRUE == regulatoryDomain_getChMaxPower(channel, &maxTxPower))
 	{
@@ -457,7 +457,7 @@ void regulatoryDomain_GetPowerCapability(powerCapability_t *pPowerCapability,
 	}
 	else
 	{
-		pPowerCapability->maxTxPower = DBM_DIV_10_2_DBM(MAX_TX_POWER);
+		pPowerCapability->maxTxPower = WLAN_MAX_TX_POWER_DBM;
 	}
 }
 
@@ -688,7 +688,7 @@ int32_t regulatoryDomain_setSupportedChannelsAccording2CountryIe(dot11_COUNTRY_t
 		pSupportedChannels[channelIndex].channelValidityActive = FALSE;
 		pSupportedChannels[channelIndex].channelValidityPassive = FALSE;
 		pSupportedChannels[channelIndex].uFlags = 0;
-		pSupportedChannels[channelIndex].uMaxTxPowerDomain = MIN_TX_POWER;
+		pSupportedChannels[channelIndex].uMaxTxPowerDomain = WLAN_MIN_TX_POWER_DBM;
 	}
 
 	/* Set validity of the channels according to triplets in IE */
@@ -746,9 +746,8 @@ int32_t regulatoryDomain_setSupportedChannelsAccording2CountryIe(dot11_COUNTRY_t
 							pSupportedChannels[channelIndex4Band].uFlags |= TIW_REG_DOMAIN_HT40PLUS;
 					}
                     #endif
-					/* set the TX power in DBM/10 units */
 					pSupportedChannels[channelIndex4Band].uMaxTxPowerDomain =
-						DBM2DBMDIV10(pCountry->countryIE.tripletChannels[tripletChannelIndex].maxTxPowerLevel);
+						pCountry->countryIE.tripletChannels[tripletChannelIndex].maxTxPowerLevel;
 
                     GTRACE(GRP_REG_DOMAIN, "channel = %d uMaxTxPowerDomain=%d", channelNumber, pSupportedChannels[channelIndex4Band].uMaxTxPowerDomain);
 				}
@@ -923,6 +922,14 @@ int32_t regulatoryDomain_SetCountry(uint8_t *pCountryStr)
 	/* Set country code as current country code */
     os_memcpy(gCountryDomainStr, pCountryStr, REG_DOMAIN_COUNTRY_STR_LEN);
 
+    /* Ensure environment byte is valid per 802.11d §7.3.2.12.
+     * REG_DOMAIN_COUNTRY_STR_LEN is 2, so byte[2] is not copied above.
+     * 0x20 = "any environment" (the safe default). */
+    if (gCountryDomainStr[2] == 0x00)
+    {
+        gCountryDomainStr[2] = 0x20;
+    }
+
     return OK;
 }
 
@@ -990,7 +997,7 @@ static void setWorldWideDomainSupportedChannels()
 		/* Update FW channel bitmap */
 		setChannelAsFwBitmap ((TWD_CALIBRATION_CHANNEL_2_4_MIN + channelIndex), TRUE, TRUE);
 
-		pRegulatoryDomain->supportedChannels_band_2_4[channelIndex].uMaxTxPowerDomain = DBM2DBMDIV10(20);
+		pRegulatoryDomain->supportedChannels_band_2_4[channelIndex].uMaxTxPowerDomain = WLAN_MAX_TX_POWER_DBM;
 	}
 
 	/* Step 2: Set WW 2.4Ghz Passive channels*/
@@ -1012,7 +1019,7 @@ static void setWorldWideDomainSupportedChannels()
 	{
 		pRegulatoryDomain->supportedChannels_band_5[channelIndex].channelValidityActive = FALSE;
 		pRegulatoryDomain->supportedChannels_band_5[channelIndex].channelValidityPassive = (Bool32)localDefaultABandChannels[channelIndex];
-		pRegulatoryDomain->supportedChannels_band_5[channelIndex].uMaxTxPowerDomain = DBM2DBMDIV10(20);
+		pRegulatoryDomain->supportedChannels_band_5[channelIndex].uMaxTxPowerDomain = WLAN_MAX_TX_POWER_DBM;
 		if (pRegulatoryDomain->supportedChannels_band_5[channelIndex].channelValidityPassive)
 		{
 			pRegulatoryDomain->supportedChannels_band_5[channelIndex].uFlags = TIW_REG_DOMAIN_DFS;
@@ -1393,8 +1400,8 @@ static int8_t setSupportedChannelsAccording2Domain(void)
                     pSupportedChannels[channelIndex].channelValidityActive = TRUE;
 					setChannelAsFwBitmap(channel, pChanPattern->band == RADIO_BAND_2_4GHZ ? TRUE : FALSE, TRUE);
                 }
-                /* set the TX power in DBM/10 units */
-                pSupportedChannels[channelIndex].uMaxTxPowerDomain = DBM2DBMDIV10(pChanPattern->txPowerPerRegion[groupPatternIndex]);
+                pSupportedChannels[channelIndex].uMaxTxPowerDomain = (int8_t)MIN(pChanPattern->txPowerPerRegion[groupPatternIndex],
+                                                                                   WLAN_MAX_TX_POWER_DBM);
             }
             channelBitmask>>=1;
             channelbit++;
@@ -1416,7 +1423,7 @@ DESCRIPTION: Find the Max Tx power of selected channel.
 
 RETURN:      TRUE if valid channel TX power found, FALSE otherwise.
 ************************************************************************/
-Bool_e regulatoryDomain_getChMaxPower(uint16_t channel, uint8_t *max_tx_power)
+Bool_e regulatoryDomain_getChMaxPower(uint16_t channel, int8_t *max_tx_power)
 {
     channelCapability_t channelCapability;
     RadioBand_e temp_band;
@@ -1437,7 +1444,7 @@ Bool_e regulatoryDomain_getChMaxPower(uint16_t channel, uint8_t *max_tx_power)
 
     if (status == OK)
     {
-        *max_tx_power = DBM_DIV_10_2_DBM(channelCapability.uMaxTxPowerDomain);
+        *max_tx_power = channelCapability.uMaxTxPowerDomain;
         GTRACE(GRP_REG_DOMAIN, "max_tx_power for channel %d = %d dbm",
 								channel,
 								*max_tx_power);
@@ -1457,16 +1464,18 @@ static uint8_t isCountryCodeValid(uint8_t *pCountryStr)
 		return 0;
 	}
 
+	/* 802.11d §7.3.2.12: valid environment bytes are
+	 * 0x20 (any), 0x49 ('I' indoor), 0x4F ('O' outdoor). */
 	if ((pCountryStr[0] >= 'A') && (pCountryStr[0] <= 'Z') &&
-		(pCountryStr[1] >= 'A')&&(pCountryStr[1] <= 'Z') && 
-		((pCountryStr[2] == '\0') || (pCountryStr[2] == 'I') ||
-		 (pCountryStr[2] == '0')))
+		(pCountryStr[1] >= 'A') && (pCountryStr[1] <= 'Z') &&
+		((pCountryStr[2] == 0x20) || (pCountryStr[2] == 'I') ||
+		 (pCountryStr[2] == 'O')))
 	{
 		return 1;
 	}
 	else if ((pCountryStr[0] == '0') && (pCountryStr[1] == '0') &&
-			 ((pCountryStr[2] == '\0') || (pCountryStr[2] == 'I') ||
-			  (pCountryStr[2] == '0')))
+			 ((pCountryStr[2] == 0x20) || (pCountryStr[2] == 'I') ||
+			  (pCountryStr[2] == 'O')))
 	{
 		return 1;
 	}
@@ -1709,7 +1718,8 @@ void regulatoryDomain_handlePowerConstraint(ti_driver_ifData_t *pDrv,
     int8_t apPowerLevel, powerReduction80211h, powerLevelCisco;
     int8_t newApLevel, powerLevel80211d, newMaxPowerLevel;
     uint8_t apBssid[MAC_ADDR_LEN];
-    uint8_t channel, apBand, channelTxPower;
+    uint8_t channel, apBand;
+    int8_t  channelTxPower;
     
     if (freq_to_chan(pDrv->freq, &channel, &apBand) < 0)
 	{
@@ -1801,7 +1811,7 @@ void regulatoryDomain_handlePowerConstraint(ti_driver_ifData_t *pDrv,
 	/* Take minimum of max TX power from reg domain DB and 11d
 	 * reducing TPC power constraint.
 	 */
-	newMaxPowerLevel = MIN(channelTxPower, pDrv->apPowerLevel);
+	newMaxPowerLevel = MIN(MIN(channelTxPower, pDrv->apPowerLevel), pDrv->fwMaxTxPower);
     
     if (newMaxPowerLevel != pDrv->fwMaxTxPower)
     {
@@ -1869,11 +1879,11 @@ int32_t checkCustomDomainEntryValidity(WlanSetRegDomainCustomEntry_t *entryParam
 						 WLAN_ERROR_TYPE__INVALID_PARAM_SET_TYPE);
 	}
 
-	if (entryParams->MaxTxPower > DBM_DIV_10_2_DBM(MAX_TX_POWER))
+	if (entryParams->MaxTxPower > WLAN_MAX_TX_POWER_DBM)
 	{
 		CME_PRINT_REPORT_ERROR("Invalid TX power for reg domain rule. "
 			   				   "max is %d dBm",
-							   DBM_DIV_10_2_DBM(MAX_TX_POWER));
+							   WLAN_MAX_TX_POWER_DBM);
 		return WlanError(WLAN_ERROR_SEVERITY__LOW,
 						 WLAN_ERROR_MODULE__COMMANDS,
 						 WLAN_ERROR_TYPE__INVALID_PARAM_SET_TYPE);
@@ -1900,6 +1910,7 @@ int32_t regulatoryDomain_SetCustomDomainEntry(WlanSetRegDomainCustomEntry_t *ent
 	uint8_t tableEntryIndex = 0;
 	ConfigChanPattern_t *pTableEntry = NULL;
 	int8_t minChannelBit = 0, maxChannelBit = 0;
+	bool isOverwrite = false;
 
 	if (!entryParams)
 	{
@@ -1919,6 +1930,7 @@ int32_t regulatoryDomain_SetCustomDomainEntry(WlanSetRegDomainCustomEntry_t *ent
 
 	tableEntryIndex = REG_DOMAIN_CUSTOM_ENTRY_BASE + entryParams->customIndex;
 	pTableEntry = &(gConfigChanPatternsTable[tableEntryIndex]);
+	isOverwrite = (pTableEntry->chanBitmap != 0);
 
 	if (entryParams->resetEntry)
 	{
@@ -1975,8 +1987,11 @@ int32_t regulatoryDomain_SetCustomDomainEntry(WlanSetRegDomainCustomEntry_t *ent
 		   entryParams->chanBitmap, entryParams->minChannel,
 		   entryParams->maxChannel, entryParams->numOfChannels);
 
-	gCustomRegDomainEntriesCount++;
-	ASSERT_GENERAL(gCustomRegDomainEntriesCount <= CUSTOM_RULES_COUNT);
+	if (!isOverwrite)
+	{
+		gCustomRegDomainEntriesCount++;
+		ASSERT_GENERAL(gCustomRegDomainEntriesCount <= CUSTOM_RULES_COUNT);
+	}
 
     return 0;
 }

@@ -93,6 +93,8 @@
 
 #define RSN_WLAN_SCAN_RESULT_SEC_TYPE_MASK              0x3f
 #define RSN_WLAN_SCAN_RESULT_SEC_TYPE_POSITION          8
+/* Bits 8-13: Security type (6 bits) */
+/* Note: Bit 13 was previously used for hidden SSID but is now part of security type */
 
 #define RSN_WLAN_SCAN_RESULT_GROUP_CIPHER_MASK          0xf
 #define RSN_WLAN_SCAN_RESULT_GROUP_CIPHER_POSITION      0
@@ -100,14 +102,15 @@
 #define RSN_WLAN_SCAN_RESULT_UNICAST_CIPHER_MASK        0xf
 #define RSN_WLAN_SCAN_RESULT_UNICAST_CIPHER_POSITION    4
 
-#define RSN_WLAN_SCAN_RESULT_KEY_MGMT_MASK              0x3
+#define RSN_WLAN_SCAN_RESULT_KEY_MGMT_MASK              0x7
 #define RSN_WLAN_SCAN_RESULT_KEY_MGMT_POSITION          14
 
 #define RSN_WLAN_SCAN_RESULT_GROUP_CIPHER(SecurityInfo)              (SecurityInfo & 0xF)   /* Possible values: NONE,RSN_WLAN_CIPHER_BITMAP_TKIP,RSN_WLAN_CIPHER_BITMAP_CCMP */
 #define RSN_WLAN_SCAN_RESULT_UNICAST_CIPHER_BITMAP(SecurityInfo)     ((SecurityInfo & 0xF0) >> 4 ) /* Possible values: NONE,RSN_WLAN_CIPHER_BITMAP_WEP40,RSN_WLAN_CIPHER_BITMAP_WEP104,RSN_WLAN_CIPHER_BITMAP_TKIP,RSN_WLAN_CIPHER_BITMAP_CCMP*/
-#define RSN_WLAN_SCAN_RESULT_HIDDEN_SSID(SecurityInfo)               (SecurityInfo & 0x2000 ) >> 13 /* Possible values: TRUE/FALSE */
-#define RSN_WLAN_SCAN_RESULT_KEY_MGMT_SUITES_BITMAP(SecurityInfo)    (SecurityInfo & 0x1800 ) >> 11  /* Possible values: RSN_WLAN_KEY_MGMT_SUITE_802_1_X, RSN_WLAN_KEY_MGMT_SUITE_PSK */
+#define RSN_WLAN_SCAN_RESULT_KEY_MGMT_SUITES_BITMAP(SecurityInfo)    ((SecurityInfo & (RSN_WLAN_SCAN_RESULT_KEY_MGMT_MASK << RSN_WLAN_SCAN_RESULT_KEY_MGMT_POSITION)) >> RSN_WLAN_SCAN_RESULT_KEY_MGMT_POSITION)  /* bits 14-16; Possible values: RSN_WLAN_KEY_MGMT_SUITE_802_1_X, RSN_WLAN_KEY_MGMT_SUITE_PSK, RSN_WLAN_KEY_MGMT_SUITE_SAE */
 #define RSN_WLAN_SCAN_RESULT_SEC_TYPE_BITMAP(SecurityInfo)           ((SecurityInfo & (RSN_WLAN_SCAN_RESULT_SEC_TYPE_MASK << RSN_WLAN_SCAN_RESULT_SEC_TYPE_POSITION)) >> RSN_WLAN_SCAN_RESULT_SEC_TYPE_POSITION)  /* Possible values: RSN_WLAN_SECURITY_TYPE_BITMAP_OPEN, RSN_WLAN_SECURITY_TYPE_BITMAP_WEP, RSN_WLAN_SECURITY_TYPE_BITMAP_WPA, RSN_WLAN_SECURITY_TYPE_BITMAP_WPA2, 0x6 (mix mode) RSN_WLAN_SECURITY_TYPE_BITMAP_WPA | RSN_WLAN_SECURITY_TYPE_BITMAP_WPA2 */
+#define RSN_WLAN_SCAN_RESULT_PMF_CAPABLE(SecurityInfo)               (RSN_WLAN_SCAN_RESULT_SEC_TYPE_BITMAP(SecurityInfo) & RSN_WLAN_SECURITY_TYPE_BITMAP_PMF_CAPABLE)
+#define RSN_WLAN_SCAN_RESULT_PMF_REQUIRED(SecurityInfo)              (RSN_WLAN_SCAN_RESULT_SEC_TYPE_BITMAP(SecurityInfo) & RSN_WLAN_SECURITY_TYPE_BITMAP_PMF_REQUIRED)
 
 #define RSN_WLAN_SECURITY_TYPE_BITMAP_OPEN            (0)  
 #define RSN_WLAN_SECURITY_TYPE_BITMAP_WEP             (1 << 0)  
@@ -125,6 +128,7 @@
 
 #define RSN_WLAN_KEY_MGMT_SUITE_802_1_X               1
 #define RSN_WLAN_KEY_MGMT_SUITE_PSK                   2
+#define RSN_WLAN_KEY_MGMT_SUITE_SAE                   4    // WPA3-Personal (SAE key exchange)
 
 /* Available legacy authentication modes */
 typedef enum
@@ -337,7 +341,7 @@ CipherSuite_e rsn_getPairwiseSuite();
  * Return - 0 on success, negative on error*
  *
  * ---------------------------------------------------------------------------- */
-int rsn_rsnWpaIe2SecurityInfo(dot11_RSN_t *rsnIe, uint8_t rsnIeLen, uint16_t *securityType);
+int rsn_rsnWpaIe2SecurityInfo(dot11_RSN_t *rsnIe, uint8_t rsnIeLen, uint32_t *securityType);
 
 
 

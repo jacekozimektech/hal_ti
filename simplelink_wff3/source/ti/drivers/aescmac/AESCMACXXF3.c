@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2025, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,7 +46,8 @@
 #include <ti/drivers/cryptoutils/utils/CryptoUtils.h>
 #include <ti/devices/DeviceFamily.h>
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /* Using LPF3 driver implementation for WFF3, since the HSM IP is the same. */
     #if (ENABLE_KEY_STORAGE == 1)
         #include <ti/drivers/cryptoutils/cryptokey/CryptoKeyKeyStore_PSA.h>
@@ -56,6 +57,9 @@
     #include <ti/drivers/cryptoutils/hsm/HSMXXF3Utility.h>
     #include <third_party/hsmddk/include/Kit/EIP130/TokenHelper/incl/eip130_asset_policy.h>
     #include <third_party/hsmddk/include/Kit/EIP130/TokenHelper/incl/eip130_token_result.h>
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+        #include <ti/drivers/xmem/XMEMWFF3.h>
+    #endif
 #endif
 
 #include <ti/drivers/dpl/DebugP.h>
@@ -105,7 +109,8 @@ static inline int_fast16_t AESCMACXXF3_waitForResult(AESCMAC_Handle handle);
 static inline void AESCMACXXF3_xorBlock(uint32_t *block1_dst, const uint32_t *block2);
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /* OneStep-related internal APIs*/
 static int_fast16_t AESCMACXXF3HSM_oneStepOperation(AESCMAC_Handle handle,
                                                     AESCMAC_Operation *operation,
@@ -196,7 +201,8 @@ static void AESCMACXXF3_hwiFxn(uintptr_t arg0)
  */
 void AESCMAC_init(void)
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     HSMXXF3_constructRTOSObjects();
 #endif
 #if (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX)
@@ -222,7 +228,8 @@ AESCMAC_Handle AESCMAC_construct(AESCMAC_Config *config, const AESCMAC_Params *p
     }
 #endif
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     /* Initialize and boot HSM */
     if (HSMXXF3_init() != HSMXXF3_STATUS_SUCCESS)
     {
@@ -320,8 +327,9 @@ static void AESCMACXXF3_getResult(AESCMACXXF3_Object *object)
             AESCMACXXF3_readTag((uint32_t *)&object->intermediateTag[0]);
         }
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
         else
     #endif
             if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
@@ -782,7 +790,8 @@ int_fast16_t AESCMAC_oneStepSign(AESCMAC_Handle handle, AESCMAC_Operation *opera
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         status = AESCMACXXF3HSM_oneStepOperation(handle, operation, key, AESCMAC_OP_TYPE_SIGN);
@@ -809,7 +818,8 @@ int_fast16_t AESCMAC_oneStepVerify(AESCMAC_Handle handle, AESCMAC_Operation *ope
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         status = AESCMACXXF3HSM_oneStepOperation(handle, operation, key, AESCMAC_OP_TYPE_VERIFY);
@@ -843,7 +853,8 @@ static int_fast16_t AESCMACXXF3_setupSegmentedOperation(AESCMACXXF3_Object *obje
     }
     else
 #endif
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
     {
         /* A segmented operation may have been started but not finalized yet */
@@ -901,7 +912,8 @@ int_fast16_t AESCMAC_setupSign(AESCMAC_Handle handle, const CryptoKey *key)
     if (status == AESCMAC_STATUS_SUCCESS)
     {
         object->operationType = AESCMAC_OP_TYPE_SEGMENTED_SIGN;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
         {
             /* If the HSM IP and/or HSMSAL failed to boot then we cannot perform any HSM-related operation */
@@ -944,7 +956,8 @@ int_fast16_t AESCMAC_setupVerify(AESCMAC_Handle handle, const CryptoKey *key)
     if (status == AESCMAC_STATUS_SUCCESS)
     {
         object->operationType = AESCMAC_OP_TYPE_SEGMENTED_VERIFY;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
         if ((key->encoding == CryptoKey_PLAINTEXT_HSM) || (key->encoding == CryptoKey_KEYSTORE_HSM))
         {
             /* If the HSM IP and/or HSMSAL failed to boot then we cannot perform any HSM-related operation */
@@ -984,7 +997,8 @@ int_fast16_t AESCMAC_addData(AESCMAC_Handle handle, AESCMAC_Operation *operation
     AESCMACXXF3_Object *object = AESCMACXXF3_getObject(handle);
     int_fast16_t status        = AESCMAC_STATUS_ERROR;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -1130,7 +1144,8 @@ int_fast16_t AESCMAC_finalize(AESCMAC_Handle handle, AESCMAC_Operation *operatio
     AESCMACXXF3_Object *object = AESCMACXXF3_getObject(handle);
     int_fast16_t status        = AESCMAC_STATUS_ERROR;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if ((object->common.key.encoding == CryptoKey_PLAINTEXT_HSM) ||
         (object->common.key.encoding == CryptoKey_KEYSTORE_HSM))
     {
@@ -1224,7 +1239,8 @@ void AESCMAC_close(AESCMAC_Handle handle)
 
     AESCMACXXF3_Object *object = AESCMACXXF3_getObject(handle);
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if (object->common.key.encoding & CRYPTOKEY_HSM)
     {
         /* Attempt to free all assets the driver created. If there is a failure,
@@ -1263,7 +1279,8 @@ int_fast16_t AESCMAC_cancelOperation(AESCMAC_Handle handle)
     /* If the operation is in _HSM mode, then the driver does not rely on 'object->common' metadata
      * and instead relies on HSM metadata. The check below insures that.
      */
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     if (((object->common.key.encoding & CRYPTOKEY_HSM) == 0U) && (!object->common.operationInProgress))
 #else
     if (!object->common.operationInProgress)
@@ -1275,7 +1292,8 @@ int_fast16_t AESCMAC_cancelOperation(AESCMAC_Handle handle)
 
     HwiP_restore(interruptKey);
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     /* Since the HSM cannot cancel an in-progress token, we must wait for the result to allow for
      * subsequent token submissions to succeed.
      */
@@ -1314,7 +1332,8 @@ int_fast16_t AESCMAC_cancelOperation(AESCMAC_Handle handle)
     return AESCMAC_STATUS_SUCCESS;
 }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 
 /*
  *  ======== AESCMACXXF3HSM_oneStepOperation ========
@@ -1543,6 +1562,30 @@ inline static void AESCMACXXF3HSM_performHSMOperationPostProcessing(uintptr_t ar
     }
 }
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/*
+ *  ======== AESCMACXXF3HSM_chunkPostProcessing ========
+ *
+ * Minimal callback for intermediate (non-final) CMAC tokens in the PSRAM
+ * chunking loop. Records the token result and releases CommonResource; the
+ * caller drives the loop and handles cleanup on failure. The full
+ * AESCMACXXF3HSM_postProcessingCommon path is intentionally skipped so that
+ * the tempAsset and key asset are preserved for the remaining chunks.
+ */
+inline static void AESCMACXXF3HSM_chunkPostProcessing(uintptr_t arg0)
+{
+    AESCMAC_Handle handle      = (AESCMAC_Handle)arg0;
+    AESCMACXXF3_Object *object = AESCMACXXF3_getObject(handle);
+    int32_t physicalResult     = HSMXXF3_getResultCode();
+    int8_t tokenResult         = physicalResult & HSMXXF3_RETVAL_MASK;
+
+    object->common.returnStatus = (tokenResult == EIP130TOKEN_RESULT_SUCCESS) ? AESCMAC_STATUS_SUCCESS
+                                                                              : AESCMAC_STATUS_ERROR;
+
+    CommonResourceXXF3_releaseLock();
+}
+    #endif
+
 /*
  *  ======== AESCMACXXF3HSM_performHSMOperation ========
  */
@@ -1615,7 +1658,117 @@ static int_fast16_t AESCMACXXF3HSM_performHSMOperation(AESCMAC_Handle handle)
         isFinal = false;
     }
 
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* Reject operations where the input is in external memory but no bounce
+     * buffer has been configured -- the HSM cannot DMA from PSRAM directly.
+     */
+    if (XMEMWFF3_isAddrExternal((uintptr_t)object->input) && (HSMXXF3_inputBounce.size == 0U))
+    {
+        (void)AESCMACXXF3HSM_freeAllAssets(handle);
+        HSMXXF3_releaseLock();
+        return AESCMAC_STATUS_ERROR;
+    }
+
+    /* When the block-aligned input lives in PSRAM and exceeds the bounce slot,
+     * split it into bounce-slot-sized chunks and submit each as a non-final
+     * intermediate token. The final chunk (or the remainder handled by
+     * processFinalBlock) is left in object->input/inputLength for the normal
+     * flow below. Each intermediate token uses the tempAsset to carry CMAC
+     * state across chunks.
+     */
+    size_t psramTotalBlockAligned = 0U;
+    if (XMEMWFF3_isAddrExternal((uintptr_t)object->input) && (HSMXXF3_inputBounce.size > 0U) &&
+        (object->inputLength > HSMXXF3_inputBounce.size))
+    {
+        /* Callback mode cannot be supported: each submitted token fires its
+         * own callback and would incorrectly signal completion mid-stream.
+         */
+        if (object->common.returnBehavior == AES_RETURN_BEHAVIOR_CALLBACK)
+        {
+            (void)AESCMACXXF3HSM_freeAllAssets(handle);
+            HSMXXF3_releaseLock();
+            return AESCMAC_STATUS_FEATURE_NOT_SUPPORTED;
+        }
+
+        /* Ensure a tempAsset exists so the HSM can carry CMAC state. */
+        if (object->tempAssetID == 0U)
+        {
+            status = AESCMACXXF3HSM_CreateTempAssetID(handle);
+            if (status != AESCMAC_STATUS_SUCCESS)
+            {
+                (void)AESCMACXXF3HSM_freeAllAssets(handle);
+                HSMXXF3_releaseLock();
+                return status;
+            }
+        }
+
+        /* Round down to a block-aligned chunk size that fits in the bounce buffer. */
+        size_t maxChunkSize = HSMXXF3_inputBounce.size & ~(AES_BLOCK_SIZE - 1U);
+        uint8_t *chunkPtr   = object->input;
+        size_t remaining    = object->inputLength;
+
+        /* Save the total block-aligned length. When isFinal is false (non-block-
+         * multiple input), processFinalBlock computes its remainder as
+         * (operation->inputLength - object->inputLength). After the loop
+         * object->inputLength holds only the last-chunk size; restore the
+         * original value after constructCMACToken has encoded it into the token.
+         */
+        psramTotalBlockAligned = object->inputLength;
+
+        while (remaining > maxChunkSize)
+        {
+            object->input       = chunkPtr;
+            object->inputLength = maxChunkSize;
+
+            HSMXXF3_constructCMACToken(object, isNew, false);
+
+            if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))
+            {
+                (void)AESCMACXXF3HSM_freeAllAssets(handle);
+                HSMXXF3_releaseLock();
+                return AESCMAC_STATUS_RESOURCE_UNAVAILABLE;
+            }
+
+            int_fast16_t chunkRetval = HSMXXF3_submitToken(HSMXXF3_RETURN_BEHAVIOR_POLLING,
+                                                           AESCMACXXF3HSM_chunkPostProcessing,
+                                                           (uintptr_t)handle);
+            if (chunkRetval == HSMXXF3_STATUS_SUCCESS)
+            {
+                chunkRetval = HSMXXF3_waitForResult();
+            }
+
+            if (chunkRetval != HSMXXF3_STATUS_SUCCESS || object->common.returnStatus != AESCMAC_STATUS_SUCCESS)
+            {
+                (void)AESCMACXXF3HSM_freeAllAssets(handle);
+                HSMXXF3_releaseLock();
+                return AESCMAC_STATUS_ERROR;
+            }
+
+            chunkPtr += maxChunkSize;
+            remaining -= maxChunkSize;
+            isNew = false;
+        }
+
+        /* Point object at the remaining data; normal flow handles the final chunk. */
+        object->input       = chunkPtr;
+        object->inputLength = remaining;
+    }
+    #endif
+
     HSMXXF3_constructCMACToken(object, isNew, isFinal);
+
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+    /* constructCMACToken has encoded the last-chunk length into the EIP-130
+     * token fields. Restore the total block-aligned length so that
+     * processFinalBlock (called from performHSMOperationPostProcessing when
+     * isFinal is false) correctly computes the unprocessed remainder as
+     * (operation->inputLength - object->inputLength).
+     */
+    if (psramTotalBlockAligned > 0U)
+    {
+        object->inputLength = psramTotalBlockAligned;
+    }
+    #endif
 
     /* Due to errata SYS_211, get HSM lock to avoid AHB bus master transactions. */
     if (!CommonResourceXXF3_acquireLock(object->common.semaphoreTimeout))

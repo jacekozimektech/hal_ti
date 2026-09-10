@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2025, Texas Instruments Incorporated
+ * Copyright (c) 2019-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,6 +43,13 @@
 #include <ti/drivers/UART2.h>
 #include <ti/drivers/uart2/UART2Support.h>
 #include <ti/log/Log.h>
+
+#include <ti/devices/DeviceFamily.h>
+
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+    #include <ti/drivers/xmem/XMEMWFF3.h>
+    #include <ti/drivers/uart2/UART2WFF3.h>
+#endif
 
 extern const UART2_Config UART2_config[];
 extern const uint_least8_t UART2_count;
@@ -215,6 +222,41 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
         return UART2_STATUS_EINVALID;
     }
 
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+
+    UART2WFF3_HWAttrs const *hwAttrs = handle->hwAttrs;
+
+    if (XMEMWFF3_isAddrExternal((uintptr_t)buffer))
+    {
+
+        /* Return error if bounce buffer is too small */
+        if (size > hwAttrs->RXBounceBuffer.size)
+        {
+            HwiP_restore(key);
+            return UART2_STATUS_EINVALID;
+        }
+
+        /* Return error if callback mode */
+        if (object->state.readMode == UART2_Mode_CALLBACK)
+        {
+            HwiP_restore(key);
+            return UART2_STATUS_EINVALID;
+        }
+
+        /* Set writebuf to bounce buffer */
+        object->readBuf = hwAttrs->RXBounceBuffer.buffer;
+    }
+    else
+    {
+        object->readBuf = (unsigned char *)buffer;
+    }
+
+#else
+
+    object->readBuf = (unsigned char *)buffer;
+
+#endif
+
     /* The driver is now free to start a read transaction. Even though there is no active "user read" ongoing,
      * the ring buffer could be receiving data in the background. Stop potentially ongoing transfers before proceeding.
      */
@@ -222,7 +264,6 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
 
     /* Update driver state variables */
     object->readInUse          = true;
-    object->readBuf            = (unsigned char *)buffer;
     object->readSize           = size;
     object->readCount          = size; /* Number remaining to be read */
     object->bytesRead          = 0;    /* Number of bytes read */
@@ -248,7 +289,7 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
         {
             available = object->readCount;
         }
-        memcpy((unsigned char *)buffer + object->bytesRead, srcAddr, available);
+        memcpy(object->readBuf + object->bytesRead, srcAddr, available);
 
         Log_printf(LogModule_UART2, Log_VERBOSE,
                    "UART2_readTimeout: Read %d byte(s) from the ring buffer.",
@@ -259,6 +300,61 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
         object->bytesRead += available;
 
     } while ((available > 0) && (object->readCount > 0));
+
+    /* Partial read return mode:
+     * The partial read return mode is supposed to return with partial data when
+     * a receive timeout occurs in the HW. However, if the receive timeout has
+     * already occurred before the UART2_read()/UART2_readTimeout() call (while
+     * reading into the ring buffer), the call will block until new data arrives
+     * (or a new receive timeout occurs or the software based 'timeout' occurs).
+     *
+     * To prevent this, the partial read should return immediately if an
+     * unhandled receive timeout has occurred in the past while reading into the
+     * ring buffer, which is tracked by receiveTimeoutOccurred.
+     *
+     * Specifically we should return content from the ring buffer immediately
+     * if:
+     * 1. The ring buffer was not empty, and
+     * 2. The last byte in the ring buffer was consumed, and
+     * 3. The last byte in the ring buffer was followed by a receive timeout
+     *
+     * To check point 2. we check if readCount > 0, which is the number of bytes
+     * left to read. If there are more bytes left to read, then it means
+     * all bytes in the ring buffer were consumed and more bytes are still
+     * needed.
+     * But all bytes could also have been consumed if the ring buffer contained
+     * exactly the number of bytes requested to be read. In that case, readCount
+     * would be 0, and then the operation will not be a "partial" read. So the read
+     * operation will already return early. So it is acceptable to use
+     * readCount > 0 to check if the last byte in the ring buffer was consumed.
+     *
+     * If the ring buffer contained exactly as many bytes as requested,
+     * readCount reaches 0 after the drain loop and the standard readCount == 0
+     * completion path below already handles the return, so this block is not
+     * entered. The receiveTimeoutOccurred flag may remain set in that case but
+     * is harmless: the next call to UART2_read() on an empty ring buffer will
+     * drain zero bytes (bytesRead == 0), failing condition 1 before
+     * receiveTimeoutOccurred is ever evaluated.
+     */
+    if ((object->state.readReturnMode == UART2_ReadReturnMode_PARTIAL) /* Check if partial read return mode. */
+        && (object->bytesRead > 0)                                     /* 1. */
+        && (object->readCount > 0)                                     /* 2. */
+        && (object->state.receiveTimeoutOccurred)                      /* 3. */
+    )
+    {
+        /* Flush any bytes the DMA transferred while readCount was still valid.
+         */
+        UART2Support_dmaStopRx(handle);
+
+        /* Clear the receive timeout flag, since it has now been consumed. */
+        object->state.receiveTimeoutOccurred = false;
+
+        /* Since this is a partial read, no more bytes should be read.*/
+        object->readCount = 0;
+
+        /* Re-arm background DMA so new data accumulates in the ring buffer. */
+        UART2Support_dmaStartRx(handle);
+    }
 
     /* If we are in nonblocking mode, the read operation is done. Update state variables */
     if (object->state.readMode == UART2_Mode_NONBLOCKING)
@@ -324,10 +420,12 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
             /* Stop RX temporarily*/
             UART2Support_dmaStopRx(handle);
 
-            /* Update state variables */
+            /* Update state variables. readInUse is updated at end of function call to allow RXBouncebuffer to empty
+             * before potentially being called again. This is only applicable to CC35XX, but is kept consistent for
+             * all driver implementations.
+             */
             object->readCount = 0;
             object->readBuf   = NULL;
-            object->readInUse = false;
 
             /* In case RX was cancelled or timed out, start a new RX. This will start a transaction into the ring buffer
              */
@@ -363,6 +461,31 @@ int_fast16_t UART2_readTimeout(UART2_Handle handle, void *buffer, size_t size, s
     }
 
     HwiP_restore(key);
+
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+
+    if (XMEMWFF3_isAddrExternal((uintptr_t)buffer))
+    {
+        UART2WFF3_Object *objectWff3 = handle->object;
+
+        int_fast16_t xmemStatus = XMEMWFF3_write(objectWff3->psramHandleRX,
+                                                 XMEMWFF3_addrToOffset((uintptr_t)buffer),
+                                                 hwAttrs->RXBounceBuffer.buffer,
+                                                 object->bytesRead,
+                                                 XMEM_WRITE);
+
+        if (xmemStatus != XMEM_STATUS_SUCCESS)
+        {
+            status = UART2_STATUS_EFAIL;
+        }
+    }
+
+#endif
+
+    if (object->state.readMode == UART2_Mode_BLOCKING)
+    {
+        object->readInUse = false;
+    }
 
     return status;
 }
@@ -587,9 +710,81 @@ int_fast16_t UART2_writeTimeoutBlocking(UART2_Handle handle,
         return UART2_STATUS_EINUSE;
     }
 
+#if DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX
+
+    if (XMEMWFF3_isAddrExternal((uintptr_t)buffer))
+    {
+
+        UART2WFF3_Object *objectWff3         = handle->object;
+        UART2WFF3_HWAttrs const *hwAttrsWff3 = handle->hwAttrs;
+
+        /* Return error if bounce buffer is too small */
+        if (size > hwAttrsWff3->TXBounceBuffer.size)
+        {
+            HwiP_restore(key);
+            return UART2_STATUS_EINVALID;
+        }
+
+        /* Return error if callback mode */
+        if (object->state.writeMode == UART2_Mode_CALLBACK)
+        {
+            HwiP_restore(key);
+            return UART2_STATUS_EINVALID;
+        }
+
+        XMEM_MemType memType = XMEMWFF3_addrToType((uintptr_t)buffer);
+
+        /* Indicate that a transfer is in progress to block concurrent write operations */
+        object->writeInUse = true;
+
+        /* Re-enable interrupts before calling XMEMWFF3_read, which might block. */
+        HwiP_restore(key);
+
+        int_fast16_t status;
+
+        if (memType == XMEM_MEM_PSRAM)
+        {
+            /* Read from PSRAM with the dedicated handle */
+            status = XMEMWFF3_read(objectWff3->psramHandleTX,
+                                   XMEMWFF3_addrToOffset((uintptr_t)buffer),
+                                   hwAttrsWff3->TXBounceBuffer.buffer,
+                                   size,
+                                   XMEM_READ);
+        }
+        else
+        {
+            /* Read from External flash with the dedicated handle */
+            status = XMEMWFF3_read(objectWff3->flashHandleTX,
+                                   XMEMWFF3_addrToOffset((uintptr_t)buffer),
+                                   hwAttrsWff3->TXBounceBuffer.buffer,
+                                   size,
+                                   XMEM_READ);
+        }
+
+        if (status != XMEM_STATUS_SUCCESS)
+        {
+            object->writeInUse = false;
+            return UART2_STATUS_EFAIL;
+        }
+
+        /* Set writebuf to bounce buffer */
+        object->writeBuf = hwAttrsWff3->TXBounceBuffer.buffer;
+
+        key = HwiP_disable();
+    }
+    else
+    {
+        object->writeBuf = buffer;
+    }
+
+#else
+
+    object->writeBuf = buffer;
+
+#endif
+
     /* Update state variables */
     object->writeInUse          = true;
-    object->writeBuf            = buffer;
     object->writeSize           = size;
     object->writeCount          = size;
     object->bytesWritten        = 0;
@@ -607,7 +802,7 @@ int_fast16_t UART2_writeTimeoutBlocking(UART2_Handle handle,
     {
         /* RTOS not started yet, called from main(), use polling mode */
         HwiP_restore(key);
-        return UART2_writePolling(handle, buffer, size, bytesWritten);
+        return UART2_writePolling(handle, object->writeBuf, size, bytesWritten);
     }
 
     /* Start TX transaction */

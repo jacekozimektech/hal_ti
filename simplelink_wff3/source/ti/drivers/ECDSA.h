@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2026, Texas Instruments Incorporated
+ * Copyright (c) 2017-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -573,6 +573,11 @@ extern "C" {
 #define ECDSA_STATUS_KEYSTORE_ERROR (-11)
 
 /*!
+ * @brief   The requested operation is not supported by this implementation.
+ */
+#define ECDSA_STATUS_FEATURE_NOT_SUPPORTED (-12)
+
+/*!
  *  @brief ECDSA Global configuration
  *
  *  The ECDSA_Config structure contains a set of pointers used to characterize
@@ -637,7 +642,8 @@ typedef enum
                                          */
 } ECDSA_ReturnBehavior;
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /*!
  *  @brief  Enum for the curve types supported by the driver.
  */
@@ -682,7 +688,8 @@ typedef enum
  */
 typedef struct
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     ECDSA_CurveType curveType; /*!< An ECDSA_CurveType value indicating which EC curve to use for the operation*/
     size_t hashLength;         /*!< The length in bytes of the hash digest */
 #endif
@@ -712,7 +719,8 @@ typedef struct
  */
 typedef struct
 {
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     ECDSA_CurveType curveType;
     size_t hashLength; /*!< The length in bytes of the hash digest */
 #else
@@ -906,11 +914,12 @@ void ECDSA_OperationVerify_init(ECDSA_OperationVerify *operation);
  *                                  buffers necessary to perform the operation
  *  @sa ECDSA_verify()
  *
- *  @retval #ECDSA_STATUS_SUCCESS               The operation succeeded.
- *  @retval #ECDSA_STATUS_ERROR                 The operation failed.
- *  @retval #ECDSA_STATUS_RESOURCE_UNAVAILABLE  The required hardware resource was not available. Try again later.
- *  @retval #ECDSA_STATUS_CANCELED              The operation was canceled.
- *  @retval #ECDSA_STATUS_KEYSTORE_ERROR                The keystore module returned an error.
+ *  @retval #ECDSA_STATUS_SUCCESS                   The operation succeeded.
+ *  @retval #ECDSA_STATUS_ERROR                     The operation failed.
+ *  @retval #ECDSA_STATUS_RESOURCE_UNAVAILABLE      The required hardware resource was not available. Try again later.
+ *  @retval #ECDSA_STATUS_CANCELED                  The operation was canceled.
+ *  @retval #ECDSA_STATUS_KEYSTORE_ERROR            The keystore module returned an error.
+ *  @retval #ECDSA_STATUS_FEATURE_NOT_SUPPORTED     The requested operation is not supported by this implementation.
  */
 int_fast16_t ECDSA_sign(ECDSA_Handle handle, ECDSA_OperationSign *operation);
 
@@ -940,6 +949,7 @@ int_fast16_t ECDSA_sign(ECDSA_Handle handle, ECDSA_OperationSign *operation);
  * prime.
  *  @retval #ECDSA_STATUS_POINT_AT_INFINITY             The public key to verify against is the point at infinity.
  *  @retval #ECDSA_STATUS_KEYSTORE_ERROR                The keystore module returned an error.
+ *  @retval #ECDSA_STATUS_FEATURE_NOT_SUPPORTED         The requested operation is not supported by this implementation.
  */
 int_fast16_t ECDSA_verify(ECDSA_Handle handle, ECDSA_OperationVerify *operation);
 

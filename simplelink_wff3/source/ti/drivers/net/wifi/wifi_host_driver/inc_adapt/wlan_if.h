@@ -89,6 +89,7 @@ extern "C" {
 
 #define MAC_ADDRESS_LEN (6)
 #define WLAN_MAX_MAC_ADDRESSES (4)
+#define WLAN_MAX_PROFILES (5)
 #define CSI_MAX_DATA_LENGTH (27)
 
 /* WLAN Disconnect Reason Codes */
@@ -155,17 +156,17 @@ extern "C" {
 #define WLAN_SEC_TYPE_WPA_WPA2                                                    (2)
 #define WLAN_SEC_TYPE_WPS_PBC                                                     (3)
 #define WLAN_SEC_TYPE_WPS_PIN                                                     (4)
-#define WLAN_SEC_TYPE_WPA_ENT                                                 (5)
+#define WLAN_SEC_TYPE_WPA_ENT                                                     (5)
 #define WLAN_SEC_TYPE_P2P_PBC                                                     (6)
 #define WLAN_SEC_TYPE_P2P_PIN_KEYPAD                                              (7)
 #define WLAN_SEC_TYPE_P2P_PIN_DISPLAY                                             (8)
-#define WLAN_SEC_TYPE_P2P_PIN_AUTO                                                (9) /* NOT Supported yet */
+#define WLAN_SEC_TYPE_P2P_PIN_AUTO                                                (9)  /* NOT Supported yet */
 #define WLAN_SEC_TYPE_WPA2_PLUS                                                   (11) /* Support to WPA2 WPA2+PMF (Protected Managmant Frame) networks */
 #define WLAN_SEC_TYPE_WPA3                                                        (12) /* Support WPA3 only networks */
-#define WLAN_SEC_TYPE_WPA_PMK                                                     (15)
-#define WLAN_SEC_TYPE_WPA2_WPA3                                                   (16) /*transition mode WPA2 WPA2+PMF WPA3 */
 #define WLAN_SEC_TYPE_WPA2_AES_ONLY_PMF                                           (13) 
 #define WLAN_SEC_TYPE_WPA2_AES_ONLY_NO_PMF                                        (14) 
+#define WLAN_SEC_TYPE_WPA_PMK                                                     (15)
+#define WLAN_SEC_TYPE_WPA2_WPA3                                                   (16) /*transition mode WPA2 WPA2+PMF WPA3 */
 
 
 /* AP access List Macros */
@@ -182,20 +183,53 @@ extern "C" {
 #define SL_WLAN_SCAN_RESULT_SEC_TYPE_MASK              0x3f
 #define SL_WLAN_SCAN_RESULT_SEC_TYPE_POSITION          8
 
+/* Scan result security type bitmap values (used with WLAN_SCAN_RESULT_SEC_TYPE_BITMAP) */
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_OPEN           (0)         // RSN_WLAN_SECURITY_TYPE_BITMAP_OPEN
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WEP            (1 << 0)    // RSN_WLAN_SECURITY_TYPE_BITMAP_WEP
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA            (1 << 1)    // RSN_WLAN_SECURITY_TYPE_BITMAP_WPA
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA2           (1 << 2)    // RSN_WLAN_SECURITY_TYPE_BITMAP_WPA2
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA3           (1 << 3)    // RSN_WLAN_SECURITY_TYPE_BITMAP_WPA3
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_PMF_CAPABLE    (1 << 4)    // PMF capable (Management Frame Protection capable)
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_PMF_REQUIRED   (1 << 5)    // PMF required (Management Frame Protection required)
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_MIX_WPA_WPA2  (WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA  | WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA2)
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_MIX_WPA2_WPA3 (WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA2 | WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA3)
+/* Combined masks for security type and PMF capabilities */
+#define WLAN_SCAN_RESULT_SECURITY_TYPE_MASK          (WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_OPEN  | \
+                                                          WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA   | \
+                                                          WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA2  | \
+                                                          WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_WPA3)
+#define WLAN_SCAN_RESULT_SECURITY_PMF_CAPABILITIES_MASK     (WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_PMF_CAPABLE | \
+                                                                  WLAN_SCAN_RESULT_SECURITY_TYPE_BITMAP_PMF_REQUIRED)
+
 #define SL_WLAN_SCAN_RESULT_GROUP_CIPHER_MASK          0xf
 #define SL_WLAN_SCAN_RESULT_GROUP_CIPHER_POSITION      0
 
 #define SL_WLAN_SCAN_RESULT_UNICAST_CIPHER_MASK        0xf
 #define SL_WLAN_SCAN_RESULT_UNICAST_CIPHER_POSITION    4
 
-#define SL_WLAN_SCAN_RESULT_KEY_MGMT_MASK              0x3
+#define SL_WLAN_SCAN_RESULT_KEY_MGMT_MASK              0x7
 #define SL_WLAN_SCAN_RESULT_KEY_MGMT_POSITION          14
 
+/* Key management suite values (used with WLAN_SCAN_RESULT_KEY_MGMT_SUITES_BITMAP) */
+#define WLAN_KEY_MGMT_SUITE_NONE             0           // NONE
+#define WLAN_KEY_MGMT_SUITE_802_1_X          1           // RSN_WLAN_KEY_MGMT_SUITE_802_1_X => Corporate/Enterprise
+#define WLAN_KEY_MGMT_SUITE_PSK              2           // RSN_WLAN_KEY_MGMT_SUITE_PSK     => WPA / WPA2 Personal
+#define WLAN_KEY_MGMT_SUITE_SAE              4           // SAE => WPA3 Personal
+#define WLAN_KEY_MGMT_SUITE_MIX_PSK_802_1_X (WLAN_KEY_MGMT_SUITE_PSK | WLAN_KEY_MGMT_SUITE_802_1_X)
+#define WLAN_KEY_MGMT_SUITE_MIX_SAE_PSK     (WLAN_KEY_MGMT_SUITE_SAE | WLAN_KEY_MGMT_SUITE_PSK)
+
+/* Cipher suite bitmap values (used with WLAN_SCAN_RESULT_GROUP_CIPHER and WLAN_SCAN_RESULT_UNICAST_CIPHER_BITMAP) */
+#define WLAN_CIPHER_BITMAP_NONE              0x0         // NONE
+#define WLAN_CIPHER_BITMAP_WEP40             0x1         // RSN_WLAN_CIPHER_BITMAP_WEP40
+#define WLAN_CIPHER_BITMAP_WEP104            0x2         // RSN_WLAN_CIPHER_BITMAP_WEP104
+#define WLAN_CIPHER_BITMAP_TKIP              0x4         // RSN_WLAN_CIPHER_BITMAP_TKIP
+#define WLAN_CIPHER_BITMAP_CCMP              0x8         // RSN_WLAN_CIPHER_BITMAP_CCMP
+#define WLAN_CIPHER_BITMAP_MIX_TKIP_CCMP    (WLAN_CIPHER_BITMAP_TKIP | WLAN_CIPHER_BITMAP_CCMP)
 
 #define WLAN_SCAN_RESULT_GROUP_CIPHER(SecurityInfo)              (SecurityInfo & 0xF)   /* Possible values: NONE,TKIP,CCMP */
 #define WLAN_SCAN_RESULT_UNICAST_CIPHER_BITMAP(SecurityInfo)     ((SecurityInfo & 0xF0) >> 4 ) /* Possible values: NONE,WEP40,WEP104,TKIP,CCMP*/
 #define WLAN_SCAN_RESULT_HIDDEN_SSID(SecurityInfo)               (SecurityInfo & 0x2000 ) >> 13 /* Possible values: TRUE/FALSE */
-#define WLAN_SCAN_RESULT_KEY_MGMT_SUITES_BITMAP(SecurityInfo)    (SecurityInfo & 0x1800 ) >> 11  /* Possible values: OPEN, PSK*/
+#define WLAN_SCAN_RESULT_KEY_MGMT_SUITES_BITMAP(SecurityInfo)    ((SecurityInfo & (SL_WLAN_SCAN_RESULT_KEY_MGMT_MASK << SL_WLAN_SCAN_RESULT_KEY_MGMT_POSITION)) >> SL_WLAN_SCAN_RESULT_KEY_MGMT_POSITION)  /* bits 14-16 (3 bits); Possible values: WLAN_KEY_MGMT_SUITE_NONE, WLAN_KEY_MGMT_SUITE_802_1_X, WLAN_KEY_MGMT_SUITE_PSK, WLAN_KEY_MGMT_SUITE_SAE */
 #define WLAN_SCAN_RESULT_SEC_TYPE_BITMAP(SecurityInfo)           ((SecurityInfo & (SL_WLAN_SCAN_RESULT_SEC_TYPE_MASK << SL_WLAN_SCAN_RESULT_SEC_TYPE_POSITION)) >> SL_WLAN_SCAN_RESULT_SEC_TYPE_POSITION)  /* Possible values: SL_WLAN_SECURITY_TYPE_BITMAP_OPEN, SL_WLAN_SECURITY_TYPE_BITMAP_WEP, SL_WLAN_SECURITY_TYPE_BITMAP_WPA, SL_WLAN_SECURITY_TYPE_BITMAP_WPA2, 0x6 (mix mode) SL_WLAN_SECURITY_TYPE_BITMAP_WPA | SL_WLAN_SECURITY_TYPE_BITMAP_WPA2 */
 #define WLAN_SCAN_RESULT_PMF_ENABLE(SecurityInfo)                ((SecurityInfo & 0x4000  ) >> 14)  /* Possible values: TRUE/FALSE */
 #define WLAN_SCAN_RESULT_PMF_REQUIRED(SecurityInfo)              ((SecurityInfo & 0x8000  ) >> 15)  /* Possible values: TRUE/FALSE */
@@ -207,8 +241,11 @@ extern "C" {
 #define WLAN_CONNECT_FLAG_PROFILE_CONNECT 0x00000002
 #define WLAN_CONNECT_FLAG_ENTERPRISE_CONNECT 0x00000004
 
-
 #define WLAN_WPS_PIN_STR_LEN    9
+
+/* TX power in dBm units for command validation */
+#define WLAN_MAX_TX_POWER_DBM    (21)
+#define WLAN_MIN_TX_POWER_DBM    (-10)
 
 /*****************************************************************************/
 /* ENUM DEFINITIONS                                                     */
@@ -320,7 +357,7 @@ typedef struct
     uint8_t       Bssid[WLAN_BSSID_LENGTH];
     uint8_t       SsidLen;
     int8_t        Rssi;
-    uint16_t      SecurityInfo;
+    uint32_t      SecurityInfo;
     uint8_t       Channel;
 }WlanNetworkEntry_t;
 
@@ -330,7 +367,7 @@ typedef struct
     uint8_t       Bssid[WLAN_BSSID_LENGTH];
     uint8_t       SsidLen;
     int8_t        Rssi;
-    uint16_t      SecurityInfo;
+    uint32_t      SecurityInfo;
     uint8_t       Channel;
 
     uint16_t      mRatesLen;
@@ -428,7 +465,7 @@ typedef struct RoleUpApCmd
     /* 802.11 WLAN channel [1-12] */
     uint8_t channel;
     /* The AP's TX power */
-    uint8_t tx_pow;
+    int8_t tx_pow;
     /* Limits the number of stations that the AP's has */
     uint8_t sta_limit;
     /* Security parameters - Security Type and Password */
@@ -451,6 +488,8 @@ typedef struct RoleUpApCmd
     Bool_e p2pDeviceEnabled; //TRUE/FALSE
     /* Set P2P Params */
     P2pParams_t P2pParams;
+    /* Set AP station inactivity timeout (sec) */
+    uint32_t apMaxInactivity;
 }RoleUpApCmd_t;
 
 typedef struct RoleUpStaCmd
@@ -680,6 +719,19 @@ typedef struct __PACKED__
     uint8_t  enable_value;
     uint8_t  padding[1];
 }CalibratorThermalParams_t;
+
+typedef struct __PACKED__
+{
+    int8_t measuredTemp;
+    int8_t compensatedTemp;
+    uint8_t padding[2];
+}CalibratorGetTemperature_t;
+
+typedef struct __PACKED__
+{
+    uint8_t bitmap;
+    uint8_t padding[3];
+}CalibratorLinkRobustnessBitmap_t;
 
 
 typedef struct
@@ -983,21 +1035,30 @@ typedef struct
     uint32_t    operClass;
     uint32_t    listenChannel;
     uint32_t    listenClass;
-    uint8_t     goIntent; 
+    uint8_t     goIntent;
+    uint8_t     padding[3]; 
 } WlanP2pConfigChannelParam_t; // P2P_CMD_ID_CONFIG_CHANNELS
 
+/* Parameters for P2P_CMD_ID_GROUP_ADD */
+typedef struct
+{
+    int32_t     freq;            /* Operating frequency in MHz, 0 = auto */
+    char        ssidPostfix[24]; /* Optional suffix appended to DIRECT-XX, empty string = none */
+} WlanP2pGroupAddParam_t;
 typedef enum
 {
     P2P_CMD_ID_SCAN_STOP,
     P2P_CMD_ID_GROUP_REMOVE,
-    P2P_CMD_ID_CONFIG_CHANNELS, //channels
+    P2P_CMD_ID_CONFIG_CHANNELS, /* channels */
     P2P_CMD_ID_LISTEN,
-    P2P_CMD_ID_CANCEL
+    P2P_CMD_ID_CANCEL,
+    P2P_CMD_ID_GROUP_ADD        /* autonomous GO - start P2P group immediately */
 } WlanP2pCmdId_e;
 
 typedef union
 {
-    WlanP2pConfigChannelParam_t cfgParams; //P2P_CMD_ID_CONFIG_CHANNELS
+    WlanP2pConfigChannelParam_t cfgParams     ; /* P2P_CMD_ID_CONFIG_CHANNELS */
+    WlanP2pGroupAddParam_t      groupAddParams; /* P2P_CMD_ID_GROUP_ADD */
 } WlanP2PCmdData_u;
 typedef struct
 {
@@ -1045,6 +1106,18 @@ typedef struct
     uint32_t timeout; 
 } WlanSetWpsApPinParam_t;
 
+typedef struct
+{
+    WlanRole_e role;         
+    int8_t     tx_power_dbm; /* TX power in dBm */
+} WlanTxPowerSet_t;
+
+typedef struct
+{
+    WlanRole_e role;         /* Input: Role Type: WLAN_ROLE_STA or WLAN_ROLE_AP */
+    int8_t     tx_power_dbm; /* Output: Current TX power in dBm */
+} WlanTxPowerGet_t;
+
 typedef enum
 {
     WLAN_SET_MACADDRESS,
@@ -1056,6 +1129,7 @@ typedef enum
     WLAN_SET_CALIBRATOR_CHANNEL_TUNE,
     WLAN_SET_CALIBRATOR_TX_START,
     WLAN_SET_CALIBRATOR_TX_TONE_START,
+    WLAN_SET_CALIBRATOR_TX_TONE_STOP,
     WLAN_SET_CALIBRATOR_TX_STOP,
     WLAN_SET_CALIBRATOR_START_RX,
     WLAN_SET_CALIBRATOR_STOP_RX,
@@ -1102,6 +1176,7 @@ typedef enum
     WLAN_SET_WIRELESS_PROTOCOL,
     WLAN_SET_PEER_AGING_TIMEOUT,
     WLAN_SET_CALIBRATOR_THERMAL_CFG,
+    WLAN_SET_CALIBRATOR_LINK_ROBUSTNESS_BITMAP,
     WLAN_SET_PRIMARY_CONNECTIVITY_FW,
     WLAN_SET_CONNECTION_SCAN_EARLY_TERMINATION,
     WLAN_SET_CONNECTION_POLICY,
@@ -1110,7 +1185,9 @@ typedef enum
     WLAN_SET_WPS_AP_PIN,
     WLAN_SET_SCHED_SCAN_PLANS,
     WLAN_SET_CSI_SOLICITATION,
-    WLAN_SET_CSI_SOLICITATION_MAC
+    WLAN_SET_CSI_SOLICITATION_MAC,
+    WLAN_SET_TX_POWER,
+    WLAN_SET_UAPSD_MAX_SP_LEN
 } WlanSet_e;
 
 
@@ -1145,7 +1222,9 @@ typedef enum
     WLAN_GET_PRIMARY_CONNECTIVITY_FW,
     WLAN_GET_CONNECTION_SCAN_EARLY_TERMINATION,
     WLAN_GET_CONNECTION_POLICY,
-    WLAN_GET_SYSINFO
+    WLAN_GET_SYSINFO,
+    WLAN_GET_TX_POWER,
+    WLAN_GET_CALIBRATOR_TEMPERATURE
 } WlanGet_e;
 
 typedef struct __attribute__((packed))
@@ -1223,6 +1302,7 @@ typedef enum
     CALIBRATOR_ACTION_TX_START,
     CALIBRATOR_ACTION_TX_STOP,
     CALIBRATOR_ACTION_TX_TONE_START,
+    CALIBRATOR_ACTION_TX_TONE_STOP,
     CALIBRATOR_ACTION_START_RX,
     CALIBRATOR_ACTION_STOP_RX,
     CALIBRATOR_ACTION_GET_RX_STATS,
@@ -1247,6 +1327,8 @@ typedef enum
     CALIBRATOR_ACTION_BA_SESSION,
     CALIBRATOR_ACTION_LINK_ADAPT,
     CALIBRATOR_ACTION_THERMAL_PROTECTION,
+    CALIBRATOR_ACTION_GET_TEMPERATURE,
+    CALIBRATOR_ACTION_LINK_ROBUSTNESS_BITMAP,
 } CalibratorAction_e;
 
 typedef enum
@@ -1725,6 +1807,26 @@ static inline void WlanRegCustomSetChannel(int channel, WlanSetRegDomainCustomEn
 int Wlan_Start(WlanEventHandlerCB_t eventHandlerCB);
 
 /*!
+    \brief start the radio (RF subsystem)
+
+    This function is turn on the radio device, initialize the upper mac thread,
+    and initialize the SPI interface
+
+    \note           This is an alias for \ref Wlan_Start
+
+    \param[in]      eventHandlerCB      event callback function
+
+    \return         Zero on success, or a negative value if an error occurred
+
+    \sa             Radio_Stop
+
+    \note           This API will power up the device and invoke the initialize the SPI i/f
+
+    \warning
+*/
+#define Radio_Start(x)  Wlan_Start(x)
+
+/*!
     \brief stop the wlan
 
     This function is turn off the wlan device, and deactivate the SPI interface
@@ -1735,13 +1837,34 @@ int Wlan_Start(WlanEventHandlerCB_t eventHandlerCB);
 
     \return         Zero on success, or a negative value if an error occurred
 
-    \sa             Wlan_Activate
+    \sa             Wlan_Start
 
     \note           This API will power off the device and invoke the deactivate the SPI i/f
 
     \warning
 */
 int Wlan_Stop(uint32_t flags);
+
+/*!
+    \brief stop the radio (RF subsystem)
+
+    This function is turn off the radio device, and deactivate the SPI interface
+
+    \note           This is an alias for \ref Wlan_Stop
+
+    \param[in]      isRecovery      Type of radio_stop.
+                                    TRUE for Recovery mode
+                                    FALSE for non recovery mode
+
+    \return         Zero on success, or a negative value if an error occurred
+
+    \sa             Radio_Start
+
+    \note           This API will power off the device and invoke the deactivate the SPI i/f
+
+    \warning
+*/
+#define Radio_Stop(x)   Wlan_Stop(x)
 
 /*!
     \brief role up the wlan
@@ -2166,10 +2289,6 @@ int Wlan_EtherPacketSend(WlanRole_e role, uint8_t *inbuf, uint32_t inbuf_len,uin
 */
 int Wlan_EtherPacketRecvRegisterCallback(WlanRole_e role, WlanNetworkDataRecvCB_t cb);
 
-#ifdef __cplusplus
-}
-#endif
-
 
 /*!
     \brief Add profile
@@ -2226,8 +2345,8 @@ int Wlan_ProfileAdd(const signed char *pName, const int NameLen,
     \param[out]     pSecParams     Security parameters. Security types options: 
 									- WLAN_SEC_TYPE_OPEN
 									- WLAN_SEC_TYPE_WPA_WPA2
-									- WLAN_SEC_TYPE_WPA_ENT
-
+                                    ...
+                                    
 								   Key and key length are not return. In case of p2p security type pin the key refers to pin code
                                    return due to security reasons.
     \param[out]     pSecExtParams  Enterprise parameters - identity, identity length,
@@ -2264,6 +2383,11 @@ int Wlan_ProfileGet(const uint16_t Index, signed char* pName, int *pNameLen,
     \warning
 */
 int Wlan_ProfileDel(const uint8_t Index);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 
 #endif /* USER_INTEFACE_WLAN_IF_H_ */

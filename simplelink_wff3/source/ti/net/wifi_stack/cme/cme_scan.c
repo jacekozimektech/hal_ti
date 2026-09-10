@@ -911,6 +911,7 @@ void cmeStartSiteSurvey(uint8_t aRoleId, CMEWlanScanCommon_t* pScanCommon)
                 reportResult - request to report result to host
  Return code:   none
 ---------------------------------------------------------------------------- */
+#ifndef TI_STA_ONLY_BUILD
 void cmeStartP2pFind(struct wpa_supplicant *wpa_s, uint8_t *peer_addr, uint32_t timeout, Bool_e reportResult)
 {
     int freq = 0;
@@ -933,6 +934,8 @@ void cmeStartP2pFind(struct wpa_supplicant *wpa_s, uint8_t *peer_addr, uint32_t 
 
  Return code:   none
 ---------------------------------------------------------------------------- */
+#endif
+#ifndef TI_STA_ONLY_BUILD
 void cmeStopP2pFind(struct wpa_supplicant *wpa_s)
 {
     struct p2p_data *p2p = NULL;
@@ -969,6 +972,7 @@ void cmeStopP2pFind(struct wpa_supplicant *wpa_s)
         wlanDispatcherSendEvent(WLAN_EVENT_P2P_SCAN_COMPLETED, (void*)NULL, 0);
     }
 }
+#endif
 
 
 #if 0

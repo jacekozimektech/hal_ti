@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2026, Texas Instruments Incorporated
+ * Copyright (c) 2021-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,6 +54,14 @@
  *  - CCM driver only supports polling return behaviour.
  *    Blocking and callback return behaviours will be supported in the future.
  *
+ *  # CC35XX: Callback Mode Restrictions with External Memory #
+ *  On CC35XX devices, #AESCMAC_RETURN_BEHAVIOR_CALLBACK is not supported when
+ *  the input buffer (or, for multi-segment operations, any segment's input buffer)
+ *  is in external PSRAM and exceeds the HSM input bounce-buffer size.
+ *  Returns #AESCMAC_STATUS_FEATURE_NOT_SUPPORTED in that case.
+ *  Use #AESCMAC_RETURN_BEHAVIOR_BLOCKING or #AESCMAC_RETURN_BEHAVIOR_POLLING instead.
+ *  See #HSMXXF3_BounceBuffers.
+ *
  *  # Runtime Parameter Validation #
  *  The driver implementation does not perform runtime checks for most input parameters.
  *  Only values that are likely to have a stochastic element to them are checked (such
@@ -88,7 +96,8 @@ extern "C" {
  *  Trigger point for auto AES as WRBUF3 (encryption starts by writing BUF3)
  *  BUSHALT enabled
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCMACXXF3_DEFAULT_AUTOCFG \
         ((uint32_t)AES_AUTOCFG_AESSRC_TXTXBUF | (uint32_t)AES_AUTOCFG_TRGAES_WRBUF3 | (uint32_t)AES_AUTOCFG_BUSHALT_EN)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
@@ -102,7 +111,8 @@ extern "C" {
  *  - ADRCHA = BUF0
  *  - TRGCHA = AESSTART
  */
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X0) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || \
+    (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
     #define AESCMACXXF3_DMA_CONFIG ((uint32_t)AES_DMA_ADRCHA_BUF0 | (uint32_t)AES_DMA_TRGCHA_AESSTART)
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     /* Not used for CC35XX */
@@ -135,7 +145,8 @@ typedef struct
     AESCMAC_Operation *operation;
     AESCMAC_OperationType operationType;
     AESCMAC_OperationalMode operationalMode;
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     uint8_t *input;
     size_t inputLength;
     uint32_t tempAssetID;

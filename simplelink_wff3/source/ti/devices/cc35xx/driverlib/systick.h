@@ -3,7 +3,7 @@
  *
  *  Description:    Prototypes for the SysTick driver.
  *
- *  Copyright (c) 2024 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -33,8 +33,8 @@
  *
  ******************************************************************************/
 
-#ifndef __SYSTICK_H__
-#define __SYSTICK_H__
+#ifndef ti_devices_systick__include
+#define ti_devices_systick__include
 
 //*****************************************************************************
 //
@@ -275,4 +275,4 @@ __STATIC_INLINE uint32_t SysTickGetValue(void)
 //
 //*****************************************************************************
 
-#endif // __SYSTICK_H__
+#endif // ti_devices_systick__include

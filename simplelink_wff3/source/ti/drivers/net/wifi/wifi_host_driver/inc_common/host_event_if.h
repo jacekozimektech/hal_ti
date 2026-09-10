@@ -30,13 +30,6 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * host_event_if.h
- *
- *  Created on: 3 Sep 2024
- *      Author: user
- */
-
 #ifndef INC_COMMON_HOST_EVENT_IF_H_
 #define INC_COMMON_HOST_EVENT_IF_H_
 

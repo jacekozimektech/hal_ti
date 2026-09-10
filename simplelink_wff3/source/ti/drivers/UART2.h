@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2026, Texas Instruments Incorporated
+ * Copyright (c) 2019-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -620,6 +620,14 @@ typedef struct
         bool inWriteCallback;                /*!< To avoid stack overflow */              \
         bool writeCallbackPending;           /*!< To avoid stack overflow */              \
         bool readToRingbuf;                  /*!< Read into ring buffer or user-buffer */ \
+        bool receiveTimeoutOccurred;         /*!< The last byte in the ring buffer        \
+                                              *   was followed by a receive timeout.      \
+                                              *   That is, this flag is set when a        \
+                                              *   receive timeout occurs while            \
+                                              *   reading to ring buffer and it is        \
+                                              *   cleared when new bytes arrive to        \
+                                              *   the ring buffer.                        \
+                                              */                                          \
     } state;                                                                              \
                                                                                           \
     HwiP_Struct hwi;                   /*!< Hwi object for interrupts */                  \

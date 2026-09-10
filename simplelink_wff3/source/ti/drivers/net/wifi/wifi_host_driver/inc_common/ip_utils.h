@@ -73,7 +73,6 @@ char *ipUtils_SputI(int, char *);
 char * ipUtils_SputI64(uint64_t num, char *buf);
 char *ipUtils_SputIp1(int, char *);
 #endif
-//TODO: move to sl_inet.h? (new)
 #ifndef INET_ADDRSTRLEN
 #define INET_ADDRSTRLEN     NS_INADDRSZ
 #endif

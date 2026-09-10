@@ -136,7 +136,7 @@ int ti_driver_authenticate(void *apPriv, struct wpa_driver_auth_params *apParams
     RadioBand_e          band;
     Channel_e            channel;
     cmeScanCandidateDesc_t *pCandidateDesc = NULL;
-    uint8_t max_tx_power;
+    int8_t max_tx_power;
 
     GTRACE(GRP_DRIVER_CC33, "Authenticate: role ID %d, auth alg 0x%x", pDrv->roleId, apParams->auth_alg);
     MLME_REPORT_PRINT("\n\rAuthenticate: role ID %d, auth alg 0x%x", pDrv->roleId, apParams->auth_alg);
@@ -480,7 +480,7 @@ int ti_driver_associate(void *apPriv,struct wpa_driver_associate_params *apParam
     else if (ROLE_IS_TYPE_AP_BASED(pDrv->roleType))
     {
         // There's nothing to do here for AP role ...
-        MLME_REPORT_PRINT_ERROR("\n\rti_driver_associate: exit Associate:for AP role");
+        MLME_REPORT_PRINT("\n\rti_driver_associate: exit Associate:for AP role");
         return 0;
     }
 

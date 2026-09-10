@@ -600,7 +600,7 @@ void udata_RegisterSecuritySeqHandler(TSecuritySeqHandler cb, void *ctx)
 TTxCtrlBlk *udata_AllocTxDataPacket(uint32_t uPayloadLen,uint32_t uHeaderLen,TEthernetHeader *pEthHead )
 {
 
-    TTxCtrlBlk    *pPktCtrlBlk;
+    TTxCtrlBlk   *pPktCtrlBlk;
     uint8_t      *pPktBuffer;
     uint32_t      payloadLenAligned;
 
@@ -624,7 +624,7 @@ TTxCtrlBlk *udata_AllocTxDataPacket(uint32_t uPayloadLen,uint32_t uHeaderLen,TEt
 
     /* allocate payload buffer */
     pPktBuffer = txCtrl_AllocPacketBuffer(pPktCtrlBlk, payloadLenAligned);
-    if (pPktBuffer == NULL)
+    if ((pPktBuffer == NULL) && (payloadLenAligned != 0))
     {
        //Report(REPORT_SEVERITY_ERROR, "udata_AllocMgmtPacket: txCtrl_AllocPacketBuffer failed\r\n");
         TWD_txCtrlBlk_Free (pPktCtrlBlk);

@@ -1,5 +1,5 @@
 /*
- *  Copyright 2022-2025, Texas Instruments Incorporated
+ *  Copyright (c) 2022-2026 Texas Instruments Incorporated
  *  SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -52,7 +52,8 @@
 
 #include <ti/devices/DeviceFamily.h>
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
     #include <ti/drivers/EDDSA.h>
     #include <ti/drivers/ecdh/ECDHXXF3HSM.h>
     #include <ti/drivers/ecdsa/ECDSAXXF3HSM.h>
@@ -225,7 +226,7 @@ psa_status_t map_ECDSA_status(int_fast16_t status, bool isVerifyOp)
             psaStatus = PSA_ERROR_INVALID_ARGUMENT;
             break;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 
         case ECDSAXXF3HSM_STATUS_NO_VALID_CURVE_TYPE_PROVIDED:
         case ECDSAXXF3HSM_STATUS_INVALID_KEY_ENCODING:
@@ -236,7 +237,8 @@ psa_status_t map_ECDSA_status(int_fast16_t status, bool isVerifyOp)
             psaStatus = PSA_ERROR_HARDWARE_FAILURE;
             break;
 
-#endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
         default:
             psaStatus = PSA_ERROR_GENERIC_ERROR;
@@ -344,7 +346,7 @@ psa_status_t map_ECDH_status(int_fast16_t status)
             psaStatus = PSA_ERROR_INVALID_HANDLE;
             break;
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 
         case ECDHXXF3HSM_STATUS_NO_VALID_CURVE_TYPE_PROVIDED:
         case ECDHXXF3HSM_STATUS_INVALID_PRIVATE_KEY_ENCODING:
@@ -361,7 +363,8 @@ psa_status_t map_ECDH_status(int_fast16_t status)
             psaStatus = PSA_ERROR_HARDWARE_FAILURE;
             break;
 
-#endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
         default:
             psaStatus = PSA_ERROR_GENERIC_ERROR;
@@ -400,13 +403,14 @@ psa_status_t map_RNG_status(int_fast16_t status)
             psaStatus = PSA_ERROR_BAD_STATE;
             break;
 
-    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 
         case RNG_STATUS_INVALID_KEY_ENCODING:
             psaStatus = PSA_ERROR_INVALID_ARGUMENT;
             break;
 
-    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX */
+    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
+              DeviceFamily_PARENT_CC23X1) */
 
         default:
             psaStatus = PSA_ERROR_GENERIC_ERROR;
@@ -451,7 +455,7 @@ psa_status_t map_TRNG_status(int_fast16_t status)
             psaStatus = PSA_ERROR_INVALID_HANDLE;
             break;
 
-    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+    #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 
         case TRNG_STATUS_INVALID_INPUT_SIZE:
         case TRNG_STATUS_INVALID_KEY_ENCODING:
@@ -463,7 +467,8 @@ psa_status_t map_TRNG_status(int_fast16_t status)
             psaStatus = PSA_SUCCESS;
             break;
 
-    #endif /* DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX */
+    #endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == \
+              DeviceFamily_PARENT_CC23X1) */
 
         default:
             psaStatus = PSA_ERROR_GENERIC_ERROR;
@@ -520,7 +525,8 @@ psa_status_t map_AES_status(int_fast16_t status)
     return psaStatus;
 }
 
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) || \
+     (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1))
 /*
  *  ======== map_keyTypeToECDSACurveTypeHSM ========
  */
@@ -648,7 +654,8 @@ ECDH_CurveType map_keyTypeToECDHCurveTypeHSM(psa_key_type_t keyType, size_t keyB
     return curveType;
 }
 
-#endif /* ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)) \
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX) \
+        * || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)                                                     \
         */
 
 /*
@@ -681,7 +688,8 @@ const ECCParams_CurveParams *map_keyTypeToECCParams(psa_key_type_t keyType, size
         case PSA_ECC_FAMILY_SECP_R1:
             switch (keyBits)
             {
-#if ((DeviceFamily_PARENT != DeviceFamily_PARENT_CC27XX) && (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX))
+#if ((DeviceFamily_PARENT != DeviceFamily_PARENT_CC27XX) && (DeviceFamily_PARENT != DeviceFamily_PARENT_CC35XX) && \
+     (DeviceFamily_PARENT != DeviceFamily_PARENT_CC23X1))
                 /* NIST P192 is not supported by HSM driver at this time */
                 case 192:
                     curveParams = &ECCParams_NISTP192;
@@ -788,6 +796,28 @@ static bool isAcceleratedHash(psa_algorithm_t alg)
             status = true;
             break;
     #endif
+    #ifdef ENABLE_TI_CRYPTO_SHA3
+        #if defined(MBEDTLS_PSA_ACCEL_ALG_SHA3_224)
+        case PSA_ALG_SHA3_224:
+            status = true;
+            break;
+        #endif
+        #if defined(MBEDTLS_PSA_ACCEL_ALG_SHA3_256)
+        case PSA_ALG_SHA3_256:
+            status = true;
+            break;
+        #endif
+        #if defined(MBEDTLS_PSA_ACCEL_ALG_SHA3_384)
+        case PSA_ALG_SHA3_384:
+            status = true;
+            break;
+        #endif
+        #if defined(MBEDTLS_PSA_ACCEL_ALG_SHA3_512)
+        case PSA_ALG_SHA3_512:
+            status = true;
+            break;
+        #endif
+    #endif /* ENABLE_TI_CRYPTO_SHA3 */
         default:
             status = false;
             break;

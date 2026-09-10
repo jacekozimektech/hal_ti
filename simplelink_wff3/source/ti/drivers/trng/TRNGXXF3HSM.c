@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, Texas Instruments Incorporated
+ * Copyright (c) 2024-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,8 +42,11 @@
 
 #if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
     #include <ti/drivers/power/PowerCC27XX.h>
+#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
+    #include <ti/drivers/power/PowerCC23X1.h>
 #elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
     #include <ti/drivers/power/PowerWFF3.h>
+    #include <ti/drivers/xmem/XMEMWFF3.h>
 #endif
 
 #include <ti/drivers/TRNG.h>
@@ -59,7 +62,23 @@
 #include DeviceFamily_constructPath(driverlib/cpu.h)
 #include DeviceFamily_constructPath(driverlib/interrupt.h)
 
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+/* Sub-256-byte requests use this pool as the HSM output target. If the pool
+ * were in PSRAM, HSMXXF3_stageOutput() would mark it as a PSRAM output and
+ * HSMXXF3_submitToken() would reject CALLBACK mode. Pinning the pool to
+ * .internalRAM.bss ensures requests with less than 256 bytes work in all return
+ * behaviors, regardless of where the caller's output buffer is located.
+ */
+    #if defined(__IAR_SYSTEMS_ICC__)
+        #pragma data_alignment = 4
+static uint8_t TRNGXXF3HSM_randomDataRawPool[HSM_RAW_RNG_BLOCK_SIZE] @ ".internalRAM.bss";
+    #else
+static uint8_t TRNGXXF3HSM_randomDataRawPool[HSM_RAW_RNG_BLOCK_SIZE]
+    __attribute__((aligned(4), section(".internalRAM.bss"))) = {0};
+    #endif
+#else
 static uint8_t TRNGXXF3HSM_randomDataRawPool[HSM_RAW_RNG_BLOCK_SIZE] = {0};
+#endif
 
 /*  TRNGXXF3HSM_getRandomRaw()
  *  The underlying function that executes the operation
@@ -168,7 +187,7 @@ void TRNG_close(TRNG_Handle handle)
     object->isOpen = false;
 }
 
-#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX)
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1)
 /*
  *  ======== TRNGXXF3HSM_reseedHSMPostProcessing ========
  */
@@ -191,8 +210,6 @@ static inline void TRNGXXF3HSM_reseedHSMPostProcessing(uintptr_t arg0)
     object->returnStatus = status;
 
     HSMXXF3_releaseLock();
-
-    Power_releaseConstraint(PowerLPF3_DISALLOW_STANDBY);
 }
 
 /*
@@ -201,8 +218,6 @@ static inline void TRNGXXF3HSM_reseedHSMPostProcessing(uintptr_t arg0)
 static inline void TRNGXXF3HSM_reseedHSMAsyncPostProcessing(uintptr_t arg0)
 {
     HSMXXF3_releaseLock();
-
-    Power_releaseConstraint(PowerLPF3_DISALLOW_STANDBY);
 }
 
 /*
@@ -313,8 +328,6 @@ static inline void TRNGXXF3HSM_switchNrbgPostProcessing(uintptr_t arg0)
     object->returnStatus = status;
 
     HSMXXF3_releaseLock();
-
-    Power_releaseConstraint(PowerLPF3_DISALLOW_STANDBY);
 }
 
 /*
@@ -373,7 +386,8 @@ int_fast16_t TRNGXXF3HSM_switchNrbgMode(TRNG_Handle handle, TRNGXXF3HSM_NRBGMode
 
     return status;
 }
-#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) */
+#endif /* (DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC23X1) \
+        */
 
 /*
  *  ======== TRNG_getRandomRawPostProcessing ========
@@ -428,8 +442,6 @@ static inline void TRNG_getRandomRawPostProcessing(uintptr_t arg0)
 
         HSMXXF3_releaseLock();
 
-        Power_releaseConstraint(PowerLPF3_DISALLOW_STANDBY);
-
         if (object->returnBehavior == TRNG_RETURN_BEHAVIOR_CALLBACK)
         {
             if (object->entropyKey != NULL)
@@ -465,6 +477,109 @@ static int_fast16_t TRNGXXF3HSM_getRandomRaw(TRNG_Handle handle)
 
     object->rawEntropyBlocksRequested = rawDataBlocksNum == 0U ? 1U : rawDataBlocksNum;
     outputBuffer = rawDataBlocksNum == 0U ? (uintptr_t)&TRNGXXF3HSM_randomDataRawPool[0] : outputBuffer;
+
+#if (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX)
+
+    if ((XMEMWFF3_isAddrExternal(outputBuffer)) && (rawDataBlocksNum > 0U) &&
+        (object->returnBehavior == TRNG_RETURN_BEHAVIOR_CALLBACK))
+    {
+        /* When the requested entropy can be fully contained in the internal
+         * pool, callback mode is supported and the output buffer location does
+         * not matter. When the requested entropy is a non-zero multiple of the
+         * block size and exceeds the internal pool, callback mode is not
+         * supported if the output buffer is in external memory because the HSM
+         * driver does not support callback mode for output buffers in external
+         * memory.
+         */
+        HSMXXF3_releaseLock();
+        return TRNG_STATUS_UNSUPPORTED;
+    }
+
+    /* When the output buffer is in PSRAM and the full request exceeds the output
+     * bounce slot, generate entropy in block-sized chunks. The HSM lock is already
+     * held so looping submit+wait here is safe - no re-acquisition needed.
+     */
+    if ((XMEMWFF3_isAddrExternal(outputBuffer)) && (rawDataBlocksNum > 0U) &&
+        ((rawDataBlocksNum * HSM_RAW_RNG_BLOCK_SIZE) > HSMXXF3_outputBounce.size))
+    {
+        /* CALLBACK mode cannot chunk: each submit would fire its own callback. */
+        if (object->returnBehavior == TRNG_RETURN_BEHAVIOR_CALLBACK)
+        {
+            HSMXXF3_releaseLock();
+            return TRNG_STATUS_UNSUPPORTED;
+        }
+
+        size_t maxBlocksPerChunk = HSMXXF3_outputBounce.size / HSM_RAW_RNG_BLOCK_SIZE;
+        if (maxBlocksPerChunk == 0U)
+        {
+            /* outputBounceSize < HSM_RAW_RNG_BLOCK_SIZE: bounce slot cannot
+             * hold even one raw entropy block. SysConfig should warn when this
+             * is misconfigured; see HSMWFF3.syscfg.js outputBounceSize validation. */
+            HSMXXF3_releaseLock();
+            return TRNG_STATUS_ERROR;
+        }
+
+        uint8_t *chunkOutput   = (uint8_t *)outputBuffer;
+        size_t remainingBlocks = rawDataBlocksNum;
+
+        while (remainingBlocks > 0U)
+        {
+            size_t blocksInChunk = (remainingBlocks > maxBlocksPerChunk) ? maxBlocksPerChunk : remainingBlocks;
+
+            HSMXXF3_constructRNGGetRawRandomNumberPhysicalToken((uintptr_t)chunkOutput, blocksInChunk);
+
+            /* NULL callback: TRNG_getRandomRawPostProcessing must not be invoked
+             * per-chunk because it would release the lock and invoke the application
+             * callback before all chunks are written. State update is done below
+             * after the loop completes.
+             */
+            hsmRetval = HSMXXF3_submitToken((HSMXXF3_ReturnBehavior)object->returnBehavior, NULL, (uintptr_t)handle);
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS)
+            {
+                HSMXXF3_releaseLock();
+                return TRNG_STATUS_ERROR;
+            }
+
+            hsmRetval = HSMXXF3_waitForResult();
+            if (hsmRetval != HSMXXF3_STATUS_SUCCESS)
+            {
+                HSMXXF3_releaseLock();
+                return TRNG_STATUS_ERROR;
+            }
+
+            int32_t tokenResult = HSMXXF3_getResultCode();
+            if ((tokenResult & HSMXXF3_RETVAL_MASK) != EIP130TOKEN_RESULT_SUCCESS)
+            {
+                HSMXXF3_releaseLock();
+                return TRNG_STATUS_ERROR;
+            }
+
+            chunkOutput += blocksInChunk * HSM_RAW_RNG_BLOCK_SIZE;
+            remainingBlocks -= blocksInChunk;
+        }
+
+        /* Replaces the entropyGenerated and entropyKey encoding updates that
+         * TRNG_getRandomRawPostProcessing would normally perform after a single
+         * token submission.
+         */
+        object->entropyGenerated = object->entropyRequested;
+
+        if (object->entropyKey != NULL)
+        {
+            if (object->entropyKey->encoding == CryptoKey_BLANK_PLAINTEXT)
+            {
+                object->entropyKey->encoding = CryptoKey_PLAINTEXT;
+            }
+            else
+            {
+                object->entropyKey->encoding = CryptoKey_PLAINTEXT_HSM;
+            }
+        }
+
+        HSMXXF3_releaseLock();
+        return TRNG_STATUS_SUCCESS;
+    }
+#endif
 
     /* Populates the HSMXXF3 commandToken as a TRNG get raw random number operation */
     HSMXXF3_constructRNGGetRawRandomNumberPhysicalToken(outputBuffer, object->rawEntropyBlocksRequested);

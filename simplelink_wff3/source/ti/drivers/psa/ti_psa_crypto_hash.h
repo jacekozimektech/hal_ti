@@ -1,6 +1,6 @@
 /*
  *  Copyright The Mbed TLS Contributors
- *  Copyright 2025, Texas Instruments Incorporated
+ *  Copyright (c) 2025-2026 Texas Instruments Incorporated
  *  SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -25,61 +25,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ti/drivers/psa/ti_psa_crypto_hash_types.h>
+
 #if ((TFM_ENABLED == 1) && !defined(TFM_BUILD))
     #include <third_party/tfm/interface/include/psa/crypto.h>
 #else
     #include <third_party/mbedtls/include/psa/crypto.h>
 #endif
 
-#include <ti/devices/DeviceFamily.h>
-#include <ti/drivers/SHA2.h>
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-    #include <ti/drivers/sha2/SHA2XXF3HSM.h>
-#elif
-    #include <ti/drivers/sha2/SHA2CC26X2.h>
-#endif
-
-/**
- * Returns the number of bytes of the input length field for a SHA2 alg.
- * Returns zero if the alg is not SHA2.
- */
-#define PSA_HASH_SUSPEND_INPUT_LENGTH_FIELD_LENGTH(alg)             \
-    (((alg == PSA_ALG_SHA_224) || (alg == PSA_ALG_SHA_256))   ? 8u  \
-     : ((alg == PSA_ALG_SHA_384) || (alg == PSA_ALG_SHA_512)) ? 16u \
-                                                              : 0u)
-
-/**
- * Returns the number of bytes of the hash suspend state field for a SHA2 alg.
- * Returns zero if the alg is not SHA2.
- */
-#define PSA_HASH_SUSPEND_HASH_STATE_FIELD_LENGTH(alg)               \
-    (((alg == PSA_ALG_SHA_224) || (alg == PSA_ALG_SHA_256))   ? 32u \
-     : ((alg == PSA_ALG_SHA_384) || (alg == PSA_ALG_SHA_512)) ? 64u \
-                                                              : 0u)
-
-struct ti_psa_hash_operation_s
-{
-    /* Driver config struct - pointer to this is referred to as the driver handle */
-    SHA2_Config sha2Config;
-    /* Driver object */
-#if ((DeviceFamily_PARENT == DeviceFamily_PARENT_CC27XX) || (DeviceFamily_PARENT == DeviceFamily_PARENT_CC35XX))
-    SHA2XXF3HSM_Object sha2Object;
-#elif (DeviceFamily_PARENT == DeviceFamily_PARENT_CC13X4_CC26X3_CC26X4)
-    SHA2CC26X2_Object sha2Object;
-#endif
-    /* Used to mark the operation struct as ready.*/
-    unsigned int id;
-    /* alg identifier */
-    psa_algorithm_t alg;
-};
-
-typedef struct ti_psa_hash_operation_s ti_psa_hash_operation_t;
-
-#define TI_PSA_HASH_OPERATION_INIT \
-    (ti_psa_hash_operation_t)      \
-    {                              \
-        0                          \
-    }
 static inline struct ti_psa_hash_operation_s ti_psa_hash_operation_init(void)
 {
     const struct ti_psa_hash_operation_s v = TI_PSA_HASH_OPERATION_INIT;

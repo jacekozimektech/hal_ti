@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2024-2025 Texas Instruments Incorporated
+ *  Copyright (c) 2024-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -37,6 +37,8 @@
 #include "FlashWFF3.h"
 #include <ti/drivers/dpl/ClockP.h>
 #include <ti/drivers/dpl/DebugP.h>
+#include <ti/drivers/Power.h>
+#include <ti/drivers/power/PowerWFF3.h>
 #include <ti/devices/DeviceFamily.h>
 #include <ti/drivers/xmem/XMEMWFF3.h>
 #include DeviceFamily_constructPath(inc/hw_memmap.h)
@@ -45,26 +47,102 @@
 /*
  * Globals
  */
-static uint32_t flashClockPTickPeriod = 1U;
+uint32_t FlashWFF3_savedPostConfigReturnVal __attribute__((used, section(".internalRAM.bss"))) = 0;
 
-static uint32_t __attribute__((section(".TI.ramfunc"))) getClockPTickUs(void);
-static bool __attribute__((section(".TI.ramfunc")))
+/* Must be in DRAM (.internalRAM.data) - accessed by .TI.ramfunc code during the
+ * PS_RAM-inaccessible window (OTFDE disabled / OSPI in flash mode).
+ * Initialized at boot time from Flash. */
+uint32_t flashClockPTickPeriod __attribute__((section(".internalRAM.data"))) = 1U;
+
+static uint32_t __attribute__((noinline, section(".TI.ramfunc"))) getClockPTickUs(void);
+static bool __attribute__((noinline, section(".TI.ramfunc")))
 FlashClockPCheckTimeout(uint32_t StartTick, uint32_t TimerInMicroSec);
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigConfigOp(uint8_t configOp);
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPreConfigOp(uint8_t DeviceNum);
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPostConfigOp(uint8_t DeviceNum);
-static int __attribute__((section(".TI.ramfunc"))) FlashDeviceSwitchConfigOp(uint8_t DeviceNum, bool bEnter);
+static FlashStigStatus __attribute__((noinline, section(".TI.ramfunc"))) FlashStigConfigOp(uint8_t configOp);
+static FlashStigStatus FlashStigPreConfigOp(uint8_t DeviceNum);
+static FlashStigStatus FlashStigPostConfigOp(uint8_t DeviceNum);
+static FlashStigStatus __attribute__((used, noinline, section(".TI.ramfunc")))
+FlashStigPreConfigOp_impl(uint8_t DeviceNum);
+static FlashStigStatus __attribute__((used, noinline, section(".TI.ramfunc")))
+FlashStigPostConfigOp_impl(uint8_t DeviceNum);
+static int __attribute__((noinline, section(".TI.ramfunc"))) FlashDeviceSwitchConfigOp(uint8_t DeviceNum, bool bEnter);
 static uint32_t FlashGetBound(uint8_t directionMode);
-static FlashUdmaJobStatus FlashUDMAOperationStatus(uint32_t channelSelect);
-static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
-                                             uint32_t *dstAddr,
-                                             uint32_t lengthBytes,
-                                             uint8_t directionMode,
-                                             uint32_t channelSelect);
+static FlashUdmaJobStatus __attribute__((noinline, section(".TI.ramfunc")))
+FlashUDMAOperationStatus(uint32_t channelSelect);
+static FlashUdmaJobStatus __attribute__((noinline)) FlashPartitioningUDMATransaction(uint32_t *srcAddr,
+                                                                                     uint32_t *dstAddr,
+                                                                                     uint32_t lengthBytes,
+                                                                                     uint8_t directionMode,
+                                                                                     uint32_t channelSelect);
 
 extern XMEMWFF3_HWAttrs XMEMWFF3_hwAttrs;
 
-uint32_t __attribute__((section(".TI.ramfunc"))) FlashIsXspiIdle()
+/* Temporary TCM_DRAM stack for the PS_RAM-inaccessible window.
+ *
+ * On CC35xx, PSRAM is accessed via the OSPI interface. When OSPI switches to target
+ * a different device (Flash for STIG operations), the PSRAM address space becomes
+ * inaccessible to the CPU.
+ *
+ * If the FreeRTOS task stack (PSP) resides in PSRAM, any function executing during
+ * this window will fault immediately - not because of interrupts, but because:
+ *   1. Function parameters and local variables are on the stack: any read/write via
+ *      PSP causes a bus fault while PSRAM is inaccessible.
+ *   2. Every nested function call does PUSH/POP to save return addresses and
+ *      registers via PSP, which also faults.
+ *
+ * The fix: before switching OSPI away from PSRAM, detect if PSP/MSP point to PSRAM
+ * and switch them to these temporary TCM_DRAM stacks. Restore the original PSP/MSP
+ * after PSRAM becomes accessible again. This is done by the naked trampolines
+ * FlashStigPreConfigOp (switch) and FlashStigPostConfigOp (restore).
+ *
+ * Both buffers are in .internalRAM (TCM_DRAM) so they remain accessible regardless
+ * of OSPI state.
+ */
+/* __attribute__((used)) prevents "unused variable/function" warnings - these
+ * symbols are only referenced from naked-trampoline inline assembly strings,
+ * which the compiler does not analyse for variable/function usage.
+ */
+/* Stringify helper - expands a macro to a string literal for use in inline asm. */
+#define _FLASH_STR(x)  #x
+#define _FLASH_XSTR(x) _FLASH_STR(x)
+
+/* PSP temp stack - used when the FreeRTOS task stack (PSP) is in PS_RAM. */
+#define FLASH_TEMP_STACK_WORDS 256 /* 1024 bytes - covers full Pre-STIG-Post call depth */
+uint32_t FlashWFF3_flashTempStackBuf[FLASH_TEMP_STACK_WORDS]
+    __attribute__((used, section(".internalRAM.bss"), aligned(8)));
+
+/* MSP temp stack - used when the main stack (MSP / .stack section) is in PS_RAM.
+ * Protects interrupt handlers that use MSP during the OTFDE-disabled window.
+ * Smaller than PSP buffer since ISR nesting depth is limited.
+ */
+#define FLASH_TEMP_MSP_STACK_WORDS 64 /* 256 bytes - sufficient for ISR nesting and exception frames */
+uint32_t FlashWFF3_flashTempMspStackBuf[FLASH_TEMP_MSP_STACK_WORDS]
+    __attribute__((used, section(".internalRAM.bss"), aligned(8)));
+
+/* PS_RAM base address in TCM_DRAM, loaded by trampoline without PS_RAM access.
+ * Derived from EXT_PSRAM_BASE (hw_memmap.h) to stay in sync with the SDK.
+ * Initialized at boot time from Flash.
+ */
+uint32_t FlashWFF3_flashPsramBase __attribute__((used, section(".internalRAM.data"))) = EXT_PSRAM_BASE;
+
+/* PS_RAM size, used for upper bound check in stack pointer validation.
+ * Initialized at boot time from Flash. */
+uint32_t FlashWFF3_flashPsramSize __attribute__((used, section(".internalRAM.data"))) = XMEM_MAX_PSRAM_SIZE;
+
+/* Saved SP values - non-zero = switch was done and must be restored. */
+uint32_t FlashWFF3_savedOriginalSP __attribute__((used, section(".internalRAM.bss")));
+uint32_t FlashWFF3_savedOriginalMSP __attribute__((used, section(".internalRAM.bss")));
+
+/* Saved stack-limit registers - cleared before switch, restored after. */
+uint32_t FlashWFF3_savedOriginalPSPLIM __attribute__((used, section(".internalRAM.bss")));
+uint32_t FlashWFF3_savedOriginalMSPLIM __attribute__((used, section(".internalRAM.bss")));
+
+uint32_t FlashWFF3_savedR0toR3[4] __attribute__((used, section(".internalRAM.bss")));
+
+/* Forward declarations - called via 'bl' in naked trampolines; mark used. */
+static FlashStigStatus __attribute__((used)) FlashStigPreConfigOp_impl(uint8_t DeviceNum);
+static FlashStigStatus __attribute__((used)) FlashStigPostConfigOp_impl(uint8_t DeviceNum);
+
+uint32_t __attribute__((noinline, section(".TI.ramfunc"))) FlashIsXspiIdle()
 {
     uint32_t idleXSPICoutnerBefore = 0;
 
@@ -82,26 +160,46 @@ uint32_t __attribute__((section(".TI.ramfunc"))) FlashIsXspiIdle()
     return FLASH_STATUS_SUCCESS;
 }
 
-void FlashRead(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length)
+FlashUdmaJobStatus FlashRead(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length)
 {
+    FlashUdmaJobStatus status;
 
-    FlashPartitioningUDMATransaction(readFromAddr,
-                                     writeToAddr,
-                                     length,
-                                     XIP_UDMA_DIRECTION_EXT_TO_INT,
-                                     XIP_UDMA_SECURE_CHANNEL);
+    /* Prevent sleep during DMA transfer */
+    Power_setConstraint(PowerWFF3_DISALLOW_SLEEP);
+
+    status = FlashPartitioningUDMATransaction(readFromAddr,
+                                              writeToAddr,
+                                              length,
+                                              XIP_UDMA_DIRECTION_EXT_TO_INT,
+                                              XIP_UDMA_SECURE_CHANNEL);
+
+    /* Allow sleep after DMA transfer completes */
+    Power_releaseConstraint(PowerWFF3_DISALLOW_SLEEP);
+
+    return status;
 }
 
-void FlashWrite(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length)
+FlashUdmaJobStatus __attribute__((noinline, section(".TI.ramfunc")))
+FlashWrite(uint32_t *readFromAddr, uint32_t *writeToAddr, uint32_t length)
 {
-    FlashPartitioningUDMATransaction(readFromAddr,
-                                     writeToAddr,
-                                     length,
-                                     XIP_UDMA_DIRECTION_INT_TO_EXT,
-                                     XIP_UDMA_SECURE_CHANNEL);
+    FlashUdmaJobStatus status;
+
+    /* Prevent sleep during DMA transfer */
+    Power_setConstraint(PowerWFF3_DISALLOW_SLEEP);
+
+    status = FlashPartitioningUDMATransaction(readFromAddr,
+                                              writeToAddr,
+                                              length,
+                                              XIP_UDMA_DIRECTION_INT_TO_EXT,
+                                              XIP_UDMA_SECURE_CHANNEL);
+
+    /* Allow sleep after DMA transfer completes */
+    Power_releaseConstraint(PowerWFF3_DISALLOW_SLEEP);
+
+    return status;
 }
 
-void __attribute__((section(".TI.ramfunc"))) FlashSetOTFDE(uint8_t setState)
+void __attribute__((noinline, section(".TI.ramfunc"))) FlashSetOTFDE(uint8_t setState)
 {
     DebugP_assert(!((setState == FLASH_OTFDE_DISABLE) || (setState == FLASH_OTFDE_ENABLE)));
 
@@ -118,16 +216,12 @@ void __attribute__((section(".TI.ramfunc"))) FlashSetOTFDE(uint8_t setState)
 /*
  * ======== FlashExecutePolling ========
  */
-uint32_t __attribute__((section(".TI.ramfunc"))) FlashExecutePolling(void)
+uint32_t __attribute__((noinline, section(".TI.ramfunc"))) FlashExecutePolling(void)
 {
 
-    OSPISTIGConfig_t XspiStigConifgReg = {0};
-    XspiStigConifgReg.stigOpcode       = OSPI_COMMAND_RDSR;
-    XspiStigConifgReg.stigRdEn         = OSPI_STIG_READ_DATA_ENABLE >> OSPI_FLASH_CMD_CTRL_ENB_READ_DATA_S;
-    XspiStigConifgReg.stigRDNumBytes   = 1;
-    uint32_t startTime                 = (uint32_t)getClockPTickUs();
-    uint32_t timerValMicroSec          = XMEMWFF3_hwAttrs.flashType.pollingCfg.timeOut * 1000;
-    int pollingCount                   = 0;
+    uint32_t startTime        = (uint32_t)getClockPTickUs();
+    uint32_t timerValMicroSec = XMEMWFF3_hwAttrs.flashType.pollingCfg.timeOut * 1000;
+    int pollingCount          = 0;
 
     /* Check the maximum time in system ticks (microsecond) for the transaction
      to complete and Wait for command completion by polling WIP bit from flash status register */
@@ -171,11 +265,10 @@ uint32_t __attribute__((section(".TI.ramfunc"))) FlashExecutePolling(void)
 /*
  * ======== FlashExecuteReadSTIGCommand ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc")))
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
 FlashExecuteReadSTIGCommand(uint32_t srcReadAddr, uint32_t *writeToAddr)
 {
     FlashStigStatus status;
-    int i;
 
     /* Configure STIG address STIG execution */
     OSPISetCommandAddress(srcReadAddr);
@@ -224,7 +317,7 @@ FlashExecuteReadSTIGCommand(uint32_t srcReadAddr, uint32_t *writeToAddr)
 /*
  * ======== FlashReadSTIG ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc")))
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
 FlashReadSTIG(uint32_t readStartAddr, uint32_t *writeToAddr, uint8_t DeviceNum)
 {
     FlashStigStatus status;
@@ -238,14 +331,9 @@ FlashReadSTIG(uint32_t readStartAddr, uint32_t *writeToAddr, uint8_t DeviceNum)
 
     /* Execute the read command */
     status = FlashExecuteReadSTIGCommand(readStartAddr, writeToAddr);
-    if (status != FLASH_STATUS_SUCCESS)
-    {
-        return status;
-    }
 
-    /* Restore system after STIG operations */
-    status = FlashStigPostConfigOp(DeviceNum);
-    if (status != FLASH_STATUS_SUCCESS)
+    /* Always restore system, PostConfigOp must run even on error. */
+    if (FlashStigPostConfigOp(DeviceNum) != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
     }
@@ -256,11 +344,10 @@ FlashReadSTIG(uint32_t readStartAddr, uint32_t *writeToAddr, uint8_t DeviceNum)
 /*
  * ======== FlashExecuteEraseSTIGCommand ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc")))
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
 FlashExecuteEraseSTIGCommand(uint32_t EraseAddr_en, uint32_t srcEraseAddr)
 {
     FlashStigStatus status;
-    int i;
 
     /* Set start address to erase */
     if (EraseAddr_en == 1)
@@ -309,7 +396,8 @@ FlashExecuteEraseSTIGCommand(uint32_t EraseAddr_en, uint32_t srcEraseAddr)
 /*
  * ======== FlashSectorErase ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashSectorErase(uint32_t eraseStartAddr, uint8_t DeviceNum)
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
+FlashSectorErase(uint32_t eraseStartAddr, uint8_t DeviceNum)
 {
     FlashStigStatus status;
 
@@ -320,16 +408,13 @@ FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashSectorErase(uint32_
         return FLASH_STIG_ERROR;
     }
 
-    /* Execute the write command */
+    /* Execute the erase command */
     status = FlashExecuteEraseSTIGCommand(1, eraseStartAddr);
-    if (status != FLASH_STATUS_SUCCESS)
-    {
-        return status;
-    }
 
-    /* Restore system after STIG operations */
-    status = FlashStigPostConfigOp(DeviceNum);
-    if (status != FLASH_STATUS_SUCCESS)
+    /* Always restore system, PostConfigOp must run even on error to
+     * switch OSPI back and restore PSRAM accessibility.
+     */
+    if (FlashStigPostConfigOp(DeviceNum) != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
     }
@@ -340,11 +425,10 @@ FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashSectorErase(uint32_
 /*
  * ======== FlashExecuteWriteSTIGCommandExtend ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc")))
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
 FlashExecuteWriteSTIGCommand(uint32_t srcWriteData, uint32_t srcWriteAddrPhy)
 {
     uint32_t status;
-    int i;
 
     /* configure STIG address and STIG Write data before Write STIG execution */
     OSPISetCommandAddress(srcWriteAddrPhy);
@@ -391,7 +475,7 @@ FlashExecuteWriteSTIGCommand(uint32_t srcWriteData, uint32_t srcWriteAddrPhy)
 /*
  * ======== FlashWriteSTIG ========
  */
-FlashStigStatus __attribute__((section(".TI.ramfunc")))
+FlashStigStatus __attribute__((noinline, section(".TI.ramfunc")))
 FlashWriteSTIG(uint32_t *readFromAddr, uint32_t *writeToAddr, uint8_t DeviceNum)
 {
     FlashStigStatus status;
@@ -405,14 +489,9 @@ FlashWriteSTIG(uint32_t *readFromAddr, uint32_t *writeToAddr, uint8_t DeviceNum)
 
     /* Execute the write command */
     status = FlashExecuteWriteSTIGCommand((uint32_t)*readFromAddr, (uint32_t)writeToAddr);
-    if (status != FLASH_STATUS_SUCCESS)
-    {
-        return status;
-    }
 
-    /* Restore system after STIG operations */
-    status = FlashStigPostConfigOp(DeviceNum);
-    if (status != FLASH_STATUS_SUCCESS)
+    /* Always restore system, PostConfigOp must run even on error. */
+    if (FlashStigPostConfigOp(DeviceNum) != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
     }
@@ -444,7 +523,7 @@ void FlashSetTickPeriod(uint32_t TickPeriod)
  * true  - Timeout not occur
  *
  */
-static bool __attribute__((section(".TI.ramfunc")))
+static bool __attribute__((noinline, section(".TI.ramfunc")))
 FlashClockPCheckTimeout(uint32_t StartTick, uint32_t TimerInMicroSec)
 {
     uint32_t currTick = getClockPTickUs();
@@ -468,7 +547,7 @@ FlashClockPCheckTimeout(uint32_t StartTick, uint32_t TimerInMicroSec)
  * #ClockP_getSystemTickPeriod() before entering RAM routiens.
  *
  */
-static uint32_t __attribute__((section(".TI.ramfunc"))) getClockPTickUs(void)
+static uint32_t __attribute__((noinline, section(".TI.ramfunc"))) getClockPTickUs(void)
 {
     return (HWREG(SYSTIM_BASE + SYSTIM_O_TIME1U) / flashClockPTickPeriod);
 }
@@ -510,7 +589,8 @@ static uint32_t FlashGetBound(uint8_t directionMode)
  * @return status FLASH_UDMA_JOB_DONE or FLASH_UDMA_JOB_ERROR
  *         after checking if UDMA job was completed.
  */
-static FlashUdmaJobStatus FlashUDMAOperationStatus(uint32_t channelSelect)
+static FlashUdmaJobStatus __attribute__((noinline, section(".TI.ramfunc")))
+FlashUDMAOperationStatus(uint32_t channelSelect)
 {
     uint32_t jobStatus;
 
@@ -550,11 +630,11 @@ static FlashUdmaJobStatus FlashUDMAOperationStatus(uint32_t channelSelect)
  *
  * @note use only SECURED channel see Jira: LPRFXXWARE-979
  */
-static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
-                                             uint32_t *dstAddr,
-                                             uint32_t lengthBytes,
-                                             uint8_t directionMode,
-                                             uint32_t channelSelect)
+static FlashUdmaJobStatus __attribute__((noinline)) FlashPartitioningUDMATransaction(uint32_t *srcAddr,
+                                                                                     uint32_t *dstAddr,
+                                                                                     uint32_t lengthBytes,
+                                                                                     uint8_t directionMode,
+                                                                                     uint32_t channelSelect)
 {
     uint32_t JobStatus;
     uint32_t bound;
@@ -593,10 +673,7 @@ static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
         /* Return an error if UDMA is busy and is unable to start a new job */
         if (JobStatus != FLASH_STATUS_SUCCESS)
         {
-            /* Return in case of an error.
-             * The error check will be in the callback function.
-             */
-            return;
+            return FLASH_UDMA_JOB_ERROR;
         }
 
         if (FlashUDMAOperationStatus(channelSelect) == FLASH_UDMA_JOB_DONE)
@@ -608,10 +685,7 @@ static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
         }
         else
         {
-            /* Return in case of an error.
-             * The error check will be in the callback function.
-             */
-            return;
+            return FLASH_UDMA_JOB_ERROR;
         }
     }
 
@@ -636,10 +710,7 @@ static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
         /* Return an error if UDMA is busy and is unable to start a new job */
         if (JobStatus != FLASH_STATUS_SUCCESS)
         {
-            /* Return in case of an error.
-             * The error check will be in the callback function.
-             */
-            return;
+            return FLASH_UDMA_JOB_ERROR;
         }
 
         if (FlashUDMAOperationStatus(channelSelect) == FLASH_UDMA_JOB_DONE)
@@ -651,12 +722,11 @@ static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
         }
         else
         {
-            /* Return in case of an error.
-             * The error check will be in the callback function
-             */
-            return;
+            return FLASH_UDMA_JOB_ERROR;
         }
     }
+
+    return FLASH_UDMA_JOB_DONE;
 }
 
 /**
@@ -665,7 +735,7 @@ static void FlashPartitioningUDMATransaction(uint32_t *srcAddr,
  * @param configOp One of the FLASH_STIG_CONFIG_* operation types
  * @return FlashStigStatus Status of the operation
  */
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigConfigOp(uint8_t configOp)
+static FlashStigStatus __attribute__((noinline, section(".TI.ramfunc"))) FlashStigConfigOp(uint8_t configOp)
 {
     FlashStigStatus status;
     int i;
@@ -811,33 +881,178 @@ static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigConfigOp
 /*!
  *  @brief  Pre-configuration for STIG operations
  *
- *  This function prepares the flash memory system for STIG (Serial Transfer Interface Gateway) operations.
+ *  This function prepares the flash memory system for STIG (Serial Transfer
+ *  Interface Gateway) operations.
  *  It performs two critical initialization steps:
- *  1. Disables OTFDE (On-The-Fly Decryption/Encryption) to allow direct STIG command execution
- *  2. Verifies that the xSPI interface is in an idle state and ready to accept commands
+ *  1. Disables OTFDE (On-The-Fly Decryption/Encryption) to allow direct STIG
+ *     command execution.
+ *  2. Verifies that the xSPI interface is in an idle state and ready to accept
+ *     commands.
  *
- *  @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM)
+ *  @param[in] DeviceNum  Device identifier (XMEM_MEM_FLASH or XMEM_MEM_PSRAM)
  *
- *  @return FlashStigStatus FLASH_STATUS_SUCCESS if successful, FLASH_STIG_ERROR if xSPI is not idle
+ *  @return FlashStigStatus FLASH_STATUS_SUCCESS if successful, FLASH_STIG_ERROR
+ *          if xSPI is not idle
  */
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPreConfigOp(uint8_t DeviceNum)
+/* FlashStigPreConfigOp - naked trampoline for stack switching before OTFDE
+ * disable.
+ *
+ * Using __attribute__((naked)) suppresses compiler-generated prologue
+ * (PUSH {LR,...}) so we can switch stack pointers BEFORE any stack operations.
+ * This is critical because once OTFDE is disabled, PSRAM becomes inaccessible.
+ * If the stack resides in PSRAM, any PUSH/POP would fault.
+ *
+ * Stack Switch Logic:
+ *  - Checks both PSP (Process Stack Pointer) and MSP (Main Stack Pointer)
+ *  - Only switches IF the pointer is >= FlashWFF3_flashPsramBase (i.e., in
+ *    PSRAM range)
+ *  - If pointer < FlashWFF3_flashPsramBase (in DRAM/TCM), leaves it unchanged
+ *  - Saves original pointer values for restoration in FlashStigPostConfigOp
+ *  - Sets PLIM registers to 0 to disable stack limit checking during switch
+ *
+ * Steps:
+ *  1. Initialize FlashWFF3_savedOriginalSP and FlashWFF3_savedOriginalMSP to 0
+ *     (no switch flags)
+ *  2. Check PSP: if in PSRAM, save original PSP and switch to
+ *     FlashWFF3_flashTempStackBuf
+ *  3. Check MSP: if in PSRAM, save original MSP and switch to
+ *     FlashWFF3_flashTempMspStackBuf
+ *  4. Call FlashStigPreConfigOp_impl which disables OTFDE (making PSRAM
+ *     inaccessible)
+ *  5. Implementation performs STIG operations safely on temp stack
+ *  6. Return to caller (stack restored in FlashStigPostConfigOp)
+ *
+ * Non-zero FlashWFF3_savedOriginalSP/MSP values act as restoration flags for
+ * the post-config function.
+ */
+/* clang-format off */
+__attribute__((naked, noinline, section(".TI.ramfunc"))) static FlashStigStatus FlashStigPreConfigOp(uint8_t DeviceNum)
+{
+    __asm__ volatile(
+
+        /* Save parameters */
+        "ldr  r12, =FlashWFF3_savedR0toR3          \n\t"
+        "stm  r12, {r0-r3}                         \n\t"
+
+        /* Default: no PSP/MSP switch */
+        "ldr  r12, =FlashWFF3_savedOriginalSP      \n\t"
+        "movs r0, #0                               \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        "ldr  r12, =FlashWFF3_savedOriginalMSP     \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        /*
+         * Check PSP
+         */
+        "mrs  r0, psp                              \n\t"
+        "ldr  r12, =FlashWFF3_flashPsramBase       \n\t"
+        "ldr  r12, [r12]                           \n\t"
+        "cmp  r0, r12                              \n\t"
+        "blo  .Lskip_psp_switch                    \n\t"
+
+        /* Check upper bound: PSP < FlashWFF3_flashPsramBase + FlashWFF3_flashPsramSize */
+        "ldr  r12, =FlashWFF3_flashPsramSize       \n\t"
+        "ldr  r12, [r12]                           \n\t"
+        "ldr  r1, =FlashWFF3_flashPsramBase        \n\t"
+        "ldr  r1, [r1]                             \n\t"
+        "add  r12, r12, r1                         \n\t"
+        "cmp  r0, r12                              \n\t"
+        "bhs  .Lskip_psp_switch                    \n\t"
+
+        /* PSP is in PSRAM - save and switch */
+        "ldr  r12, =FlashWFF3_savedOriginalSP      \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        "ldr  r12, =FlashWFF3_savedOriginalPSPLIM  \n\t"
+        "mrs  r0, psplim                           \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        "movs r0, #0                               \n\t"
+        "msr  psplim, r0                           \n\t"
+
+        "ldr  r12, =FlashWFF3_flashTempStackBuf    \n\t"
+        "add  r12, r12, #(" _FLASH_XSTR(FLASH_TEMP_STACK_WORDS) "*4) \n\t"
+        "msr  psp, r12                             \n\t"
+
+        ".Lskip_psp_switch:                        \n\t"
+
+        /*
+         * Check MSP
+         * Needed for exceptions
+         */
+        "mrs  r0, msp                              \n\t"
+        "ldr  r12, =FlashWFF3_flashPsramBase       \n\t"
+        "ldr  r12, [r12]                           \n\t"
+        "cmp  r0, r12                              \n\t"
+        "blo  .Lskip_msp_switch                    \n\t"
+
+        /* Check upper bound: MSP < FlashWFF3_flashPsramBase + FlashWFF3_flashPsramSize */
+        "ldr  r12, =FlashWFF3_flashPsramSize       \n\t"
+        "ldr  r12, [r12]                           \n\t"
+        "ldr  r1, =FlashWFF3_flashPsramBase        \n\t"
+        "ldr  r1, [r1]                             \n\t"
+        "add  r12, r12, r1                         \n\t"
+        "cmp  r0, r12                              \n\t"
+        "bhs  .Lskip_msp_switch                    \n\t"
+
+        /* MSP is in PSRAM - save and switch */
+        "ldr  r12, =FlashWFF3_savedOriginalMSP     \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        "ldr  r12, =FlashWFF3_savedOriginalMSPLIM  \n\t"
+        "mrs  r0, msplim                           \n\t"
+        "str  r0, [r12]                            \n\t"
+
+        "movs r0, #0                               \n\t"
+        "msr  msplim, r0                           \n\t"
+
+        "ldr  r12, =FlashWFF3_flashTempMspStackBuf \n\t"
+        "add  r12, r12, #(" _FLASH_XSTR(FLASH_TEMP_MSP_STACK_WORDS) "*4) \n\t"
+        "msr  msp, r12                             \n\t"
+
+        ".Lskip_msp_switch:                        \n\t"
+
+        /*
+         * Restore parameters
+         */
+        "ldr  r12, =FlashWFF3_savedR0toR3          \n\t"
+        "ldm  r12, {r0-r3}                         \n\t"
+
+        /* Save caller's return address (LR) to the current stack (already switched to
+         * temp stack if PSP was in PSRAM). The bl instruction below will overwrite LR,
+         * and internal calls within FlashStigPreConfigOp_impl will further clobber it.
+         */
+        "push {lr}                                 \n\t"
+        "bl   FlashStigPreConfigOp_impl            \n\t"
+        "pop  {lr}                                 \n\t"
+        "bx   lr                                   \n\t"
+
+        ::
+            : "r12", "memory");
+}
+/* clang-format on */
+
+/* Real implementation - runs on DRAM stack, PS_RAM may be inaccessible. */
+static FlashStigStatus __attribute__((noinline, section(".TI.ramfunc"))) FlashStigPreConfigOp_impl(uint8_t DeviceNum)
 {
     FlashStigStatus status;
 
-    /* OTFDE Disable in order to use STIG command */
+    /* OTFDE Disable - from here PS_RAM is inaccessible.
+     * Stack is already on DRAM so nested calls are safe.
+     * Interrupts are already disabled by the naked trampoline.
+     */
     FlashSetOTFDE(FLASH_OTFDE_DISABLE);
 
-    /* Switch device in order to perform STIG command */
+    /* Switch OSPI to target device */
     status = FlashDeviceSwitchConfigOp(DeviceNum, true);
-
     if (status != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
     }
 
-    /* xSPI (accessible) idle check before STIG execution */
+    /* xSPI idle check */
     status = FlashIsXspiIdle();
-
     if (status != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
@@ -849,28 +1064,113 @@ static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPreConfi
 /*!
  *  @brief  Post-configuration cleanup after STIG operations
  *
- *  This function performs cleanup operations after a STIG command has been executed.
- *  Its primary purpose is to re-enable the OTFDE (On-The-Fly Decryption/Encryption)
- *  functionality that was disabled during the STIG operation.
+ *  Mirrors FlashStigPreConfigOp but in reverse: restores OTFDE and original
+ *  SP/MSP.
  *
- *  @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM)
+ *  Critical ordering:
+ *  1. Still running on DRAM temp stack on entry (PSP/MSP = temp if they were
+ *     switched)
+ *  2. Call FlashStigPostConfigOp_impl which re-enables OTFDE
+ *  3. AFTER OTFDE is enabled, PSRAM becomes accessible again
+ *  4. THEN restore original PSP and MSP (which may point to PSRAM)
+ *  5. Restoration flags (FlashWFF3_savedOriginalSP/MSP) are checked:
+ *     non-zero = restore needed
  *
- *  @return FlashStigStatus FLASH_STATUS_SUCCESS indicating successful completion
+ *  This ordering ensures that when we restore stacks back to PSRAM addresses,
+ *  PSRAM is already accessible, avoiding any data faults during restoration.
  */
-static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPostConfigOp(uint8_t DeviceNum)
+__attribute__((naked, noinline, section(".TI.ramfunc"))) static FlashStigStatus FlashStigPostConfigOp(uint8_t DeviceNum)
+{
+    __asm__ volatile(
+
+        /* Save parameters */
+        "ldr  r12, =FlashWFF3_savedR0toR3              \n\t"
+        "stm  r12, {r0-r3}                             \n\t"
+
+        /* Execute post configuration.
+         * OTFDE is enabled inside the implementation.
+         * After return PSRAM is accessible again.
+         * Save LR before bl - it will be clobbered by internal calls inside the impl.
+         */
+        "push {lr}                                     \n\t"
+        "bl   FlashStigPostConfigOp_impl               \n\t"
+        "pop  {lr}                                     \n\t"
+
+        /* Save return value - MSP/PSP restore code uses R0 as scratch */
+        "ldr  r12, =FlashWFF3_savedPostConfigReturnVal \n\t"
+        "str  r0, [r12]                                \n\t"
+
+        /*
+         * Restore MSP if it was switched
+         */
+        "ldr  r12, =FlashWFF3_savedOriginalMSP         \n\t"
+        "ldr  r0, [r12]                                \n\t"
+        "cbz  r0, .Lskip_msp_restore                   \n\t"
+
+        "msr  msp, r0                                  \n\t"
+
+        "ldr  r12, =FlashWFF3_savedOriginalMSPLIM      \n\t"
+        "ldr  r0, [r12]                                \n\t"
+        "msr  msplim, r0                               \n\t"
+
+        /* Clear MSP restore flag */
+        "ldr  r12, =FlashWFF3_savedOriginalMSP         \n\t"
+        "movs r0, #0                                   \n\t"
+        "str  r0, [r12]                                \n\t"
+
+        ".Lskip_msp_restore:                           \n\t"
+
+        /*
+         * Restore PSP if it was switched
+         */
+        "ldr  r12, =FlashWFF3_savedOriginalSP          \n\t"
+        "ldr  r0, [r12]                                \n\t"
+        "cbz  r0, .Lskip_psp_restore                   \n\t"
+
+        "msr  psp, r0                                  \n\t"
+
+        "ldr  r12, =FlashWFF3_savedOriginalPSPLIM      \n\t"
+        "ldr  r0, [r12]                                \n\t"
+        "msr  psplim, r0                               \n\t"
+
+        /* Clear PSP restore flag */
+        "ldr  r12, =FlashWFF3_savedOriginalSP          \n\t"
+        "movs r0, #0                                   \n\t"
+        "str  r0, [r12]                                \n\t"
+
+        ".Lskip_psp_restore:                           \n\t"
+
+        /* Restore return value from .internalRAM global */
+        "ldr  r12, =FlashWFF3_savedPostConfigReturnVal \n\t"
+        "ldr  r0, [r12]                                \n\t"
+
+        "bx   lr                                       \n\t"
+
+        ::
+            : "r12", "memory");
+}
+
+/* Real implementation - still on DRAM stack, re-enables OTFDE. */
+static FlashStigStatus __attribute__((noinline, section(".TI.ramfunc"))) FlashStigPostConfigOp_impl(uint8_t DeviceNum)
 {
     FlashStigStatus status;
 
-    /* Switch device to current active device */
+    /* Switch OSPI back to active device */
     status = FlashDeviceSwitchConfigOp(DeviceNum, false);
+
+    /* Re-enable OTFDE unconditionally - must restore PS_RAM access regardless of switch result. */
+    FlashSetOTFDE(FLASH_OTFDE_ENABLE);
 
     if (status != FLASH_STATUS_SUCCESS)
     {
         return FLASH_STIG_ERROR;
     }
 
-    /* OTFDE Enable */
-    FlashSetOTFDE(FLASH_OTFDE_ENABLE);
+    /* Force a Flash data read to verify XIP is ready before returning to Flash-based code.
+     * After OSPI switch-back and OTFDE enable, the first instruction fetch from Flash may
+     * fault if the hardware hasn't fully settled.
+     */
+    (void)(*(volatile uint32_t *)EXT_FLASH_SEC_BASE);
 
     return FLASH_STATUS_SUCCESS;
 }
@@ -903,8 +1203,8 @@ static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPostConf
  *
  * Device Selection:
  * -----------------
- * - XMEM_FLASH: XIP base = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM
- * - XMEM_PSRAM: XIP base = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM + PSRAM_XIP_OFFSET
+ * - XMEM_MEM_FLASH: XIP base = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM
+ * - XMEM_MEM_PSRAM: XIP base = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM + PSRAM_XIP_OFFSET
  *
  * Operation Modes:
  * ----------------
@@ -918,13 +1218,13 @@ static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPostConf
  * ---------------
  * The function tracks the current OSPI configuration state internally:
  * - 0xFF = uninitialized (first call)
- * - 0x00 = OSPI configured for XMEM_FLASH
- * - 0x01 = OSPI configured for XMEM_PSRAM
+ * - 0x00 = OSPI configured for XMEM_MEM_FLASH
+ * - 0x01 = OSPI configured for XMEM_MEM_PSRAM
  *
  * This allows the function to skip redundant configurations and handle
  * nested enters gracefully.
  *
- * @param[in] DeviceNum  Device identifier (XMEM_FLASH or XMEM_PSRAM)
+ * @param[in] DeviceNum  Device identifier (XMEM_MEM_FLASH or XMEM_MEM_PSRAM)
  *                       Used only in ENTER mode, ignored in EXIT mode
  * @param[in] bEnter     Operation mode:
  *                       - true:  Enter device switch (configure TO DeviceNum)
@@ -942,15 +1242,17 @@ static FlashStigStatus __attribute__((section(".TI.ramfunc"))) FlashStigPostConf
  *
  * @example
  * // Flexible usage - nested enters allowed
- * FlashDeviceSwitchConfigOp(XMEM_FLASH, true);   // ENTER Flash
+ * FlashDeviceSwitchConfigOp(XMEM_MEM_FLASH, true);   // ENTER Flash
  * // ... Flash operations ...
- * FlashDeviceSwitchConfigOp(XMEM_PSRAM, true);   // ENTER PSRAM (allowed, reconfigures)
+ * FlashDeviceSwitchConfigOp(XMEM_MEM_PSRAM, true);   // ENTER PSRAM (allowed, reconfigures)
  * // ... PSRAM operations ...
- * FlashDeviceSwitchConfigOp(XMEM_PSRAM, false);  // EXIT (configure to DeviceIsActive)
+ * FlashDeviceSwitchConfigOp(XMEM_MEM_PSRAM, false);  // EXIT (configure to DeviceIsActive)
  */
-static int __attribute__((section(".TI.ramfunc"))) FlashDeviceSwitchConfigOp(uint8_t DeviceNum, bool bEnter)
+static int __attribute__((noinline, section(".TI.ramfunc"))) FlashDeviceSwitchConfigOp(uint8_t DeviceNum, bool bEnter)
 {
-    static uint8_t CurrentOSPIConfig = 0xFF; // Track actual OSPI configuration (0xFF = uninitialized)
+    static uint8_t CurrentOSPIConfig __attribute__((section(".internalRAM.data"))) = 0xFF; // Track actual OSPI
+                                                                                           // configuration (0xFF =
+                                                                                           // uninitialized)
     uint8_t DeviceIsActive;
     uint8_t TargetDevice;
     uint8_t StopBit = 0;
@@ -989,18 +1291,18 @@ static int __attribute__((section(".TI.ramfunc"))) FlashDeviceSwitchConfigOp(uin
     }
 
     /* Validate target device */
-    if (TargetDevice != XMEM_FLASH && TargetDevice != XMEM_PSRAM)
+    if (TargetDevice != XMEM_MEM_FLASH && TargetDevice != XMEM_MEM_PSRAM)
     {
         /* Invalid device number */
         return DEVICE_SWITCH_ERROR;
     }
 
     /* Determine XIP base address based on target device type */
-    if (XMEM_FLASH == TargetDevice)
+    if (XMEM_MEM_FLASH == TargetDevice)
     {
         DeviceXIPBaseAddr = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM;
     }
-    else /* XMEM_PSRAM */
+    else /* XMEM_MEM_PSRAM */
     {
         DeviceXIPBaseAddr = HOST_XIP_REGS_BASE + HOST_XIP_O_OTOSMEM + PSRAM_XIP_OFFSET;
     }

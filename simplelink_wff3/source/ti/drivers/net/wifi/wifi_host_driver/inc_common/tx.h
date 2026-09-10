@@ -53,7 +53,7 @@
 
 #define TX_HW_BLOCK_SPARE        1
 /* The maximum number of Tx descriptors in all chip families */
-#define MAX_TX_DESCRIPTORS 32
+#define MAX_TX_DESCRIPTORS 100
 #define MAX_TX_BLOCK       92
 #define TX_BUFFER_SIZE (16 * 1024)
 

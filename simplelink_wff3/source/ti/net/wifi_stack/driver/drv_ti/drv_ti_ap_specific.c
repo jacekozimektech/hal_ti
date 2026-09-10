@@ -109,6 +109,39 @@ extern signal_role_change_state_done_t g_signal_role_change_state_done;
 
 static int32_t  setApRates(uint32_t aRoleId, struct wpa_driver_ap_params *apParams);
 
+/* ----------------------------------------------------------------------------
+ ti_driver_update_channel_max_tx_power
+      Updates mode->channels[].max_tx_power for the specified channel.
+      Used to ensure Country IE reflects the configured TX power.
+
+ Parameters:    pDrv - pointer to driver instance
+                channel - channel number to update
+                max_tx_power - TX power in dBm
+ Return code:   none
+---------------------------------------------------------------------------- */
+void ti_driver_update_channel_max_tx_power(ti_driver_ifData_t *pDrv, uint8_t channel, int8_t max_tx_power)
+{
+    if (pDrv->wpa_s && pDrv->wpa_s->ap_iface && pDrv->wpa_s->ap_iface->bss[0])
+    {
+        struct hostapd_data *hapd = pDrv->wpa_s->ap_iface->bss[0];
+        if (hapd->iface && hapd->iface->current_mode)
+        {
+            struct hostapd_hw_modes *mode = hapd->iface->current_mode;
+            int i;
+            for (i = 0; i < mode->num_channels; i++)
+            {
+                if (mode->channels[i].chan == channel)
+                {
+                    mode->channels[i].max_tx_power = max_tx_power;
+                    GTRACE(GRP_DRIVER_CC33, "Updated channel %d max_tx_power to %d dBm",
+                           channel, max_tx_power);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // ============================================================================
 //      Exported APIs
 // ============================================================================
@@ -135,8 +168,8 @@ int ti_driver_set_ap(void *apPriv, struct wpa_driver_ap_params *apParams)
     struct hostapd_data  *hapd = pDrv->wpa_s->ap_iface->bss[0];
     SlotTime_e slotTime;
     int ret = 0;
-    uint8_t max_tx_power;
-
+    int8_t max_tx_power = WLAN_MAX_TX_POWER_DBM;
+    int8_t regulatory_max = WLAN_MAX_TX_POWER_DBM;
     HOOK(HOOK_DRV_TI_AP_SPECIFIC);
 
     CME_CC3XX_PORT_PRINT("\n\r enter ti_driver_set_ap");
@@ -220,9 +253,28 @@ int ti_driver_set_ap(void *apPriv, struct wpa_driver_ap_params *apParams)
         pDrv->roleStarted = TRUE;
         pDrv->beacon_set = 1;
 
-        // Send max_tx_power to firmware
-        regulatoryDomain_getChMaxPower(apParams->freq->channel, &max_tx_power);
-        GTRACE(GRP_DRIVER_CC33, "Setting role AP max TX power max_tx_power %d, channel %d", max_tx_power, apParams->freq->channel);
+        if (!regulatoryDomain_getChMaxPower(apParams->freq->channel, &regulatory_max))
+        {
+            GTRACE(GRP_DRIVER_CC33, "AP TX power: channel %d not found in regulatory domain", apParams->freq->channel);
+            ret = -1;
+            goto out;
+        }
+
+        int8_t effective_max = (int8_t)MIN(regulatory_max, WLAN_MAX_TX_POWER_DBM);
+        bool user_power_valid = (pDrv->configuredApTxPower >= WLAN_MIN_TX_POWER_DBM &&
+                                 pDrv->configuredApTxPower <= effective_max);
+
+        if (user_power_valid)
+        {
+            max_tx_power = pDrv->configuredApTxPower;
+            GTRACE(GRP_DRIVER_CC33, "AP TX power: user-specified %d dBm, channel %d", max_tx_power, apParams->freq->channel);
+        }
+        else
+        {
+            max_tx_power = effective_max;
+            GTRACE(GRP_DRIVER_CC33, "AP TX power: regulatory max %d dBm, channel %d", max_tx_power, apParams->freq->channel);
+        }
+
         regulatoryDomain_setRoleMaxTxPower(pDrv, max_tx_power);
     }
 
@@ -343,6 +395,15 @@ int ti_driver_set_channel(void *apPriv, struct hostapd_freq_params *apFreq)
     pDrv->ApRfParams.channelNumber = apFreq->channel;
     pDrv->ApRfParams.band = band;
     pDrv->ApRfParams.bandwidth = bwSettings;
+
+    /* Update channel's max_tx_power for Country IE generation
+     * This is called before the beacon is built, so we update the channel structure's
+     * to ensure the Country IE reflects the user-configured TX power.
+     */
+    if (pDrv->configuredApTxPower >= WLAN_MIN_TX_POWER_DBM && pDrv->configuredApTxPower <= WLAN_MAX_TX_POWER_DBM)
+    {
+        ti_driver_update_channel_max_tx_power(pDrv, apFreq->channel, pDrv->configuredApTxPower);
+    }
 
     return 0;
 }
@@ -670,7 +731,7 @@ int ti_driver_sta_deauth(void *apPriv,   const u8 *own_addr,
     GET_MAC_STR(apAddr, peerMacStr);
     GTRACE(GRP_DRIVER_CC33, "Deauth STA: peer %s reason %d", peerMacStr, reason);
 
-    CME_PRINT_REPORT("\r\n ti driver : ti_driver_sta_deauth:%s", peerMacStr);
+    CME_PRINT_REPORT("\r\nti driver : ti_driver_send_deauth_to_all_sta:%s", peerMacStr);
 
     if(FALSE == pDrv->roleStarted)
     {

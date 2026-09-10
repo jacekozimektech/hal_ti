@@ -1368,6 +1368,7 @@ typedef enum
     TRIGGER_FW_ASSERT           ,
     BURST_MODE_CFG              ,
     THERMAL_PROTECTION_CFG      ,
+    LINK_ROBUSTNESS_BITMAP_CFG  ,
     LAST_DEBUG_VALUE                  ,
     MAX_DOT11_DEBUG = LAST_DEBUG_VALUE  ,
 } cmdDebug_e;
@@ -1940,6 +1941,28 @@ typedef struct __PACKED__
     uint8_t  padding[1];
 } ThermalCbCfg_t;
 
+/******************************************************************************
+        ID:     TEMPERATURE_GET
+        Desc:   Read current measured and compensated temperature
+        Type:   Debug Interrogate
+******************************************************************************/
+typedef struct __PACKED__
+{
+    int8_t measuredTemp;
+    int8_t compensatedTemp;
+    uint8_t padding[2];
+} TemperatureGet_t;
+
+/******************************************************************************
+        ID:     LINK_ROBUSTNESS_BITMAP_CFG
+        Desc:   Configure link robustness features bitmap sent to PHY
+        Type:   Debug Configuration
+******************************************************************************/
+typedef struct __PACKED__
+{
+    uint8_t bitmap;
+    uint8_t padding[3];
+} LinkRobustnessBitmapCfg_t;
 
 
 /******************************************************************************
@@ -3082,7 +3105,10 @@ typedef enum {
     /*  0x19   */   CC33XX_TEST_CMD_GET_SP_VERSION = 0x19,
     /*  0x1A   */   CC33XX_TEST_CMD_SET_EFUSE = 0x1A,
     /*  0x1B   */   CC33XX_TEST_CMD_GET_EFUSE = 0x1B,
-    /*  0x1C   */   CC33XX_TEST_CMD_LOCK_EFUSE = 0x1C
+    /*  0x1C   */   CC33XX_TEST_CMD_LOCK_EFUSE = 0x1C,
+    /*  0x1D   */   CC33XX_TEST_CMD_GET_WIFI5_STATUS = 0x1D,
+	/*  0x1E   */   CC33XX_TEST_CMD_GET_WIFI6_STATUS = 0x1E,
+    /*  0x1F   */   CC33XX_TEST_CMD_TX_TONE_STOP = 0x1F
 } TestCmdID_e;
 
 
@@ -3128,6 +3154,7 @@ typedef struct
 typedef enum
 {
     BEACON_RSSI_INTR                ,
+    TEMPERATURE_GET_INTR            ,
 
     LAST_DEBUG_READ_VALUE           ,
 
@@ -3137,6 +3164,7 @@ typedef enum
 typedef union
 {
     DebugBeaconRssi_t BeaconRssi;
+    TemperatureGet_t  TemperatureGet;
 } DebugInterrogate_u;
 /**
  * struct DebugInterrogate_t -Read Interrogate command

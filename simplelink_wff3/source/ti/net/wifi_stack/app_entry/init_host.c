@@ -126,7 +126,7 @@ int32_t InitHostDriver(void)
     ctrlCmdFw_CreateMsgQueue();
 
     /* Transport init */
-    TrnsptThrdPrior = TRANSPORT_THRD_PRIORITY;
+    TrnsptThrdPrior = TRANSPORT_THREAD_PRIORITY;
     ret = trnspt_Init(TrnsptThrdPrior);
     if(ret < 0)
     {
@@ -476,7 +476,7 @@ void host_getCounters(WlanRole_e roleType, dbg_cntr_trnspt_t *counters)
 
     DESCRIPTION:    Read ini params value to initate globals on wlan_start 
 
-    CALLER:        ctrlCmdFw_DownloadIniParams
+    CALLER:         ctrlCmdFw_DownloadIniParams
 
     RETURNS:        NONE
 ******************************************************************************/
@@ -500,6 +500,10 @@ void InitIniParamsHost(cmd_ini_params_download_t *cmd)
     {
         // Set the he support value
         gpL2CommonCfg->heSupport = conf->mac.he_enable;
+
+        gpL2CommonCfg->iniIs5GHzEnabled = conf->core.enable_5ghz;
+
+        gpL2CommonCfg->iniMixedModeEnabled = conf->core.mixed_mode_support;
     }
 
     //SetAP max number of stations

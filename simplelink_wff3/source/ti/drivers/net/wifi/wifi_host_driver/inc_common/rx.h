@@ -32,6 +32,14 @@
 #ifndef HOST_DRIVER_RX_H_
 #define HOST_DRIVER_RX_H_
 
+//#define DEBUG_RX_HIGH_PRIORITY
+#ifdef DEBUG_RX_HIGH_PRIORITY
+#define RX_PRINT_HIGH_PRIORITY Report
+#define RX_PRINT_ERROR_HIGH_PRIORITY Report
+#else
+#define RX_PRINT_HIGH_PRIORITY(...)
+#define RX_PRINT_ERROR_HIGH_PRIORITY Report
+#endif
 
 //#define DEBUG_RX
 #ifdef DEBUG_RX

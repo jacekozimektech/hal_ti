@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, Texas Instruments Incorporated
+ * Copyright (c) 2020-2026 Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -900,6 +900,8 @@ void EDDSA_OperationVerify_init(EDDSA_OperationVerify *operation);
  *                                                  error state when storing
  *                                                  the public or private key.
  *  @retval #EDDSA_STATUS_KEYSTORE_ERROR            The keystore module returned an error.
+ *  @retval #EDDSA_STATUS_FEATURE_NOT_SUPPORTED     The requested operation is not
+ *                                                  supported by this implementation.
  */
 int_fast16_t EDDSA_generatePublicKey(EDDSA_Handle handle, EDDSA_OperationGeneratePublicKey *operation);
 
@@ -940,6 +942,8 @@ int_fast16_t EDDSA_generatePublicKey(EDDSA_Handle handle, EDDSA_OperationGenerat
  *                                                  error state when retrieving
  *                                                  the public or private key.
  *  @retval #EDDSA_STATUS_KEYSTORE_ERROR            The keystore module returned an error.
+ *  @retval #EDDSA_STATUS_FEATURE_NOT_SUPPORTED     The requested operation is not
+ *                                                  supported by this implementation.
  */
 int_fast16_t EDDSA_sign(EDDSA_Handle handle, EDDSA_OperationSign *operation);
 

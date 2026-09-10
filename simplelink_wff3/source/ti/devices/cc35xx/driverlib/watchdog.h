@@ -4,7 +4,7 @@
  *  Description:    Defines and prototypes for the Watchdog capabilities of the
  *                  ELPTMR peripheral.
  *
- *  Copyright (c) 2025 Texas Instruments Incorporated
+ *  Copyright (c) 2025-2026 Texas Instruments Incorporated
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -34,8 +34,8 @@
  *
  ******************************************************************************/
 
-#ifndef __WATCHDOG_H__
-#define __WATCHDOG_H__
+#ifndef ti_devices_watchdog__include
+#define ti_devices_watchdog__include
 
 //*****************************************************************************
 //
@@ -307,4 +307,4 @@ extern void WatchdogStopSequence(void);
 //
 //*****************************************************************************
 
-#endif //  __WATCHDOG_H__
+#endif // ti_devices_watchdog__include

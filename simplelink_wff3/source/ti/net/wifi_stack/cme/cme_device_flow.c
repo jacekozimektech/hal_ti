@@ -311,10 +311,12 @@ static void supplicantRunDevice()
         pGlobal = gpSupplicantGlobals;
     }
 
+#ifndef TI_STA_ONLY_BUILD
     if (TRUE == cfgGetP2pDeviceEnable())
     {
         pGlobal->params.conf_p2p_dev = os_strdup(NETIF_CONF_NAME(TIWLAN_DEV_NAME_P2PDEV));
     }
+#endif
 
     wpa_s = wpa_supplicant_add_iface(pGlobal, &iface, NULL);
     if (NULL == wpa_s)

@@ -9,6 +9,7 @@ zephyr_library_sources(
   plat/otfde_driver.c
   plat/wlan_irq_adapt.c
   plat/hif.c
+  plat/tls_iperf_mbedtls.c
 )
 
 if(CONFIG_WIFI_TI_CC35XX_USE_ZEPHYR_MBEDTLS)

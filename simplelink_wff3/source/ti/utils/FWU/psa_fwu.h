@@ -57,8 +57,8 @@ typedef enum {
     WSOC_OR_RFTool_Slot_2,      /* ID 3 */
     Vendor_Image_Slot_1,        /* ID 4 */
     Vendor_Image_Slot_2,        /* ID 5 */
-    //SBL_Slot_1,               /* ID 6 */
-    //SBL_Slot_2,               /* ID 7 */
+    Vendor_BL3_Slot_1,          /* ID 6 */
+    Vendor_BL3_Slot_2,          /* ID 7 */
     MAX_COMPONENT_ID
 } PSA_FWU_Component_ID_e;
 

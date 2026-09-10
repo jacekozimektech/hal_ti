@@ -49,7 +49,7 @@
 //#include "fw_status.h"
 #include "XMEMWFF3.h"
 #include "osi_kernel.h"
-
+#include "PowerWFF3.h"
 
 /*****************************************************************************/
 /*                           Enums and Defines                               */
@@ -59,7 +59,7 @@ typedef enum {
     BL2,                 /* ID 0 */
     WSOC_OR_RFTool,      /* ID 1 */
     Vendor_Image,        /* ID 2 */
-    //SBL,               /* ID 3 */
+    Vendor_BL3,          /* ID 3 */
     MAX_COMPONENT_TYPES
 } PSA_FWU_Component_TYPES_e;
 
@@ -118,7 +118,6 @@ typedef enum {
 
 #define PRCM_AON_NON_SECURED__PRCM_CORE_STOP_ENABLE__ADDR    (0x41091060)
 #define PRCM_SCRATCHPAD__PRCM_SCPAD2__ADDR                   (0x41099000)
-#define PRCM_AON__RST_CTRL__ADDR                             (0x410920b4)
 #define REGISTER(address) (*(volatile uint32 *)(address))
 
 #define IS_VALID_COMPONENT_ID(componentID)                        ( componentID < MAX_COMPONENT_ID )
@@ -139,7 +138,7 @@ typedef union
     {
         uint16_t BL2                      : 3; /* BITS:[0:2] */
         uint16_t WSOC_OR_RFTOOL           : 3; /* BITS:[3:5] */
-        uint16_t SBL                      : 3; /* BITS:[6:8] */
+        uint16_t VENDOR_BL3               : 3; /* BITS:[6:8] */
         uint16_t VENDOR_IMAGE             : 3; /* BITS:[9:11] */
         uint16_t START_MODE               : 3; /* BITS:[12:14] */
         uint16_t M33_REQUEST              : 1; /* BITS:[15:15] */
@@ -183,15 +182,16 @@ typedef struct
 /*                           Global parameters                               */
 /*****************************************************************************/
 PSA_FWU_Magic_t gGPEMagicNumber[MAX_COMPONENT_TYPES] = {
-    0x690c47c2 ,
-    0x690c47c2 ,
-    0x690c47c2
+    0x690c47c2 ,  /* BL2          */
+    0x690c47c2 ,  /* WSOC_OR_RFTool */
+    0x690c47c2 ,  /* Vendor_Image */
+    0x690c47c2    /* Vendor_BL3   */
 };
-//updated magic numbers
 
 PSA_FWU_Slot_Address_t gSlotAddress[MAX_COMPONENT_ID];
 
-PSA_FWU_Slot_Address_t gSlotVendorAlternate[2];
+/* Alternate addressing for vendor image and BL3 slot swap (secondary slot active) */
+PSA_FWU_Slot_Address_t gSlotAddressAlternate[4];
 
 PSA_FWU_Report_Structure_t gOTAReport[MAX_COMPONENT_TYPES];
 
@@ -234,6 +234,16 @@ extern uint32_t vendor_image_slot_1_region_size;
 extern uint32_t vendor_image_physical_slot_2_address;
 extern uint32_t vendor_image_logical_slot_2_address;
 extern uint32_t vendor_image_slot_2_region_size;
+
+/* Vendor BL3 Slot 1 memory configuration */
+extern uint32_t vendor_bl3_physical_slot_1_address;
+extern uint32_t vendor_bl3_logical_slot_1_address;
+extern uint32_t vendor_bl3_slot_1_region_size;
+
+/* Vendor BL3 Slot 2 memory configuration */
+extern uint32_t vendor_bl3_physical_slot_2_address;
+extern uint32_t vendor_bl3_logical_slot_2_address;
+extern uint32_t vendor_bl3_slot_2_region_size;
 
 /*****************************************************************************/
 /*                      Utility Functions Prototypes                         */
@@ -443,25 +453,26 @@ uint32_t Retrieve_active_and_loaded_components(psa_fwu_component_t component, ps
 
 void Create_component_XMEMHandle(psa_fwu_component_t component, uint32_t readStatus)
 {
-    psa_fwu_component_t VendorImage_component;
+    psa_fwu_component_t AlternateImage_component;
     XMEM_Params params;
+
     if ((readStatus == READ_STATUS_SECONDARY_SLOT) && (component >= Vendor_Image_Slot_1))
     {
-        VendorImage_component = component - Vendor_Image_Slot_1;
-        params.regionBase = gSlotVendorAlternate[VendorImage_component].Physical_Slot_Address;
-        params.regionStartAddr = gSlotVendorAlternate[VendorImage_component].Logical_Slot_Address;
-        params.regionSize = gSlotVendorAlternate[VendorImage_component].Region_Size;
-        params.deviceNum = 0;
-        gImageStore[component].XMEMhandle = XMEMWFF3_open(&params);
+        AlternateImage_component = component - Vendor_Image_Slot_1;
+        params.regionBase = gSlotAddressAlternate[AlternateImage_component].Physical_Slot_Address;
+        params.regionStartAddr = gSlotAddressAlternate[AlternateImage_component].Logical_Slot_Address;
+        params.regionSize = gSlotAddressAlternate[AlternateImage_component].Region_Size;
     }
     else
     {
         params.regionBase = gSlotAddress[component].Physical_Slot_Address;
         params.regionStartAddr = gSlotAddress[component].Logical_Slot_Address;
         params.regionSize = gSlotAddress[component].Region_Size;
-        params.deviceNum = 0;
-        gImageStore[component].XMEMhandle = XMEMWFF3_open(&params);
     }
+
+    params.deviceNum = 0;
+    gImageStore[component].XMEMhandle = XMEMWFF3_open(&params);
+
 }
 uint8_t Magic_validation_and_coping_version(psa_fwu_component_t component)
 
@@ -781,14 +792,33 @@ void initialize_slot_addresses(void)
     gSlotAddress[5].Logical_Slot_Address = vendor_image_logical_slot_2_address;
     gSlotAddress[5].Region_Size = vendor_image_slot_2_region_size;
 
-    // Vendor Alternate Slot configurations
-    gSlotVendorAlternate[0].Physical_Slot_Address = vendor_image_physical_slot_1_address;
-    gSlotVendorAlternate[0].Logical_Slot_Address = vendor_image_logical_slot_2_address;
-    gSlotVendorAlternate[0].Region_Size = vendor_image_slot_2_region_size;
+    // Vendor BL3 Slot 1
+    gSlotAddress[6].Physical_Slot_Address = vendor_bl3_physical_slot_1_address;
+    gSlotAddress[6].Logical_Slot_Address = vendor_bl3_logical_slot_1_address;
+    gSlotAddress[6].Region_Size = vendor_bl3_slot_1_region_size;
 
-    gSlotVendorAlternate[1].Physical_Slot_Address = vendor_image_physical_slot_2_address;
-    gSlotVendorAlternate[1].Logical_Slot_Address = vendor_image_logical_slot_1_address;
-    gSlotVendorAlternate[1].Region_Size = vendor_image_slot_1_region_size;
+    // Vendor BL3 Slot 2
+    gSlotAddress[7].Physical_Slot_Address = vendor_bl3_physical_slot_2_address;
+    gSlotAddress[7].Logical_Slot_Address = vendor_bl3_logical_slot_2_address;
+    gSlotAddress[7].Region_Size = vendor_bl3_slot_2_region_size;
+
+    // Vendor Image Alternate Slot configurations (secondary slot active)
+    gSlotAddressAlternate[0].Physical_Slot_Address = vendor_image_physical_slot_1_address;
+    gSlotAddressAlternate[0].Logical_Slot_Address = vendor_image_logical_slot_2_address;
+    gSlotAddressAlternate[0].Region_Size = vendor_image_slot_2_region_size;
+
+    gSlotAddressAlternate[1].Physical_Slot_Address = vendor_image_physical_slot_2_address;
+    gSlotAddressAlternate[1].Logical_Slot_Address = vendor_image_logical_slot_1_address;
+    gSlotAddressAlternate[1].Region_Size = vendor_image_slot_1_region_size;
+
+    // Vendor BL3 Alternate Slot configurations (secondary slot active)
+    gSlotAddressAlternate[2].Physical_Slot_Address = vendor_bl3_physical_slot_1_address;
+    gSlotAddressAlternate[2].Logical_Slot_Address = vendor_bl3_logical_slot_2_address;
+    gSlotAddressAlternate[2].Region_Size = vendor_bl3_slot_2_region_size;
+
+    gSlotAddressAlternate[3].Physical_Slot_Address = vendor_bl3_physical_slot_2_address;
+    gSlotAddressAlternate[3].Logical_Slot_Address = vendor_bl3_logical_slot_1_address;
+    gSlotAddressAlternate[3].Region_Size = vendor_bl3_slot_1_region_size;
 }
 
 /*****************************************************************************/
@@ -842,12 +872,12 @@ psa_status_t psa_fwu_start(psa_fwu_component_t component,
         UPDATE_COMPONENT_INFO_AND_RETURN_ERROR(PSA_FWU_READY ,retVal)
     }
 
-    /* In order to complete loading new version to slot, it must be a higher version */
+    /* Block only if the incoming version is strictly older than the active slot (downgrade) */
     psa_fwu_image_version_t *secondaryVersion  = (psa_fwu_image_version_t*)&(Manifest->Manifest.GPE_Version);
     psa_fwu_image_version_t *primaryVersion = &(gImageStore[component ^ 0x01].ComponentInfo.version);
 
     /* Compare versions in order of significance (major, minor, patch, build) */
-    if (!isVersionNewer(secondaryVersion , primaryVersion))
+    if (isVersionNewer(primaryVersion, secondaryVersion))
     {
         UPDATE_COMPONENT_INFO_AND_RETURN_ERROR(PSA_FWU_READY ,PSA_ERROR_NOT_PERMITTED)
     }
@@ -865,6 +895,12 @@ psa_status_t psa_fwu_start(psa_fwu_component_t component,
         }
     }
 
+    /* OTFDE region assignment:
+     *   Region 0 — Vendor_Image_Slot_1 and Vendor_BL3_Slot_1 (same OTFDE window)
+     *   Region 1 — BL2_Slot_1
+     *   Region 2 — Vendor_Image_Slot_2 and Vendor_BL3_Slot_2 (same OTFDE window)
+     * BL3 shares the vendor image OTFDE regions because it executes from the
+     * same on-the-fly decryption window as the vendor application. */
     if (component == Vendor_Image_Slot_1)
     {
         otfdeDriver_Config(0, (const uint8_t*)Manifest->Manifest_Integrity.Manifest_Integrity, TI_FWU_MANIFEST_INTEGRITY_SIZE);
@@ -1055,34 +1091,11 @@ psa_status_t psa_fwu_install(void)
     bool                isAtLeastOneCandidate = false;
     uint8_t             slotIndex;
 
-    for (component = 0; component < MAX_COMPONENT_ID;)
+    for (component = 0; component < MAX_COMPONENT_ID; component++ )
     {
-        bool hasCandidate = false;
-        bool hasBlockedState = false;
-
-        Request_type[component>>1] = 0;
-
-        for (slotIndex = 0; slotIndex < 2; component++, slotIndex++)
-        {
-            if (flow_check(component, PSA_FWU_STAGED) ||
-                flow_check(component, PSA_FWU_TRIAL) ||
-                flow_check(component, PSA_FWU_REJECTED))
-            {
-                hasBlockedState = true;
-            }
-
-            if (IS_COMPONENT_ID_PRIMARY(component))
-            {
-                continue;
-            }
-
-            if (flow_check(component, PSA_FWU_CANDIDATE))
-            {
-                hasCandidate = true;
-            }
-        }
-
-        if (hasCandidate && hasBlockedState)
+        if ( (flow_check(component, PSA_FWU_STAGED)) ||
+             (flow_check(component, PSA_FWU_TRIAL))  ||
+             (flow_check(component, PSA_FWU_REJECTED)) )
         {
             return PSA_ERROR_BAD_STATE;
         }
@@ -1098,7 +1111,7 @@ psa_status_t psa_fwu_install(void)
             {
                 continue;
             }
-
+            /* If component is not ready, skip */
             if (flow_check(component, PSA_FWU_CANDIDATE))
             {
                 update_ComponentInfo(component, PSA_FWU_STAGED, PSA_SUCCESS);
@@ -1157,14 +1170,11 @@ psa_status_t psa_fwu_request_reboot(void)
     scratchpad.FIELD.BL2 = Request_type[BL2];
     scratchpad.FIELD.WSOC_OR_RFTOOL = Request_type[WSOC_OR_RFTool];
     scratchpad.FIELD.VENDOR_IMAGE = Request_type[Vendor_Image];
+    scratchpad.FIELD.VENDOR_BL3 = Request_type[Vendor_BL3];
 
     REGISTER(PRCM_SCRATCHPAD__PRCM_SCPAD2__ADDR) = scratchpad.ALL;
 
-    REGISTER(PRCM_AON_NON_SECURED__PRCM_CORE_STOP_ENABLE__ADDR) = 0;
-
-    osi_uSleep(1000);
-
-    REGISTER(PRCM_AON__RST_CTRL__ADDR) = 0x1;
+    Power_reset();
 
     return PSA_SUCCESS;
 }
@@ -1192,6 +1202,11 @@ void psa_fwu_init(void)
             Request_type[component>>1] = 0;
 
             readStatus = Retrieve_active_and_loaded_components(component, &active_component, &loaded_component);
+
+            if (readStatus == READ_STATUS_ERROR)
+            {
+                continue;
+            }
 
             Create_component_XMEMHandle(active_component, readStatus);
             Create_component_XMEMHandle(loaded_component, readStatus);

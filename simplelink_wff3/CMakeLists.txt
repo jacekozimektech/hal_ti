@@ -76,6 +76,7 @@ if(CONFIG_HAS_CC35XX_SDK)
       source/ti/drivers/UART2.c
       source/ti/drivers/uart2/UART2WFF3.c
       source/ti/devices/cc35xx/driverlib/adc.c
+      source/ti/devices/cc35xx/driverlib/dcache.c
       source/ti/devices/cc35xx/driverlib/uart.c
       source/ti/devices/cc35xx/driverlib/spi.c
       source/ti/devices/cc35xx/driverlib/watchdog.c

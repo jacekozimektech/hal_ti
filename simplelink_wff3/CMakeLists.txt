@@ -77,6 +77,7 @@ if(CONFIG_HAS_CC35XX_SDK)
       source/ti/drivers/uart2/UART2WFF3.c
       source/ti/devices/cc35xx/driverlib/adc.c
       source/ti/devices/cc35xx/driverlib/dcache.c
+      source/ti/devices/cc35xx/driverlib/interrupt.c
       source/ti/devices/cc35xx/driverlib/uart.c
       source/ti/devices/cc35xx/driverlib/spi.c
       source/ti/devices/cc35xx/driverlib/watchdog.c
@@ -112,6 +113,7 @@ if(CONFIG_HAS_CC35XX_SDK)
         source/ti/drivers/cryptoutils/hsm/HSMXXF3.c
         source/ti/drivers/cryptoutils/sharedresources/HSMResourceXXF3.c
         source/ti/drivers/cryptoutils/sharedresources/CommonResourceXXF3.c
+        kernel/zephyr/dpl/ti_hsm_bounce_buffers.c
         third_party/hsmddk/include/Integration/HSMSAL/HSMSAL.c
         third_party/hsmddk/include/Integration/Adapter_DriverInit/Driver/src/adapter_init.c
         third_party/hsmddk/include/Integration/Adapter_DriverInit/Driver/src/adapter_driver_init.c
@@ -129,7 +131,9 @@ if(CONFIG_HAS_CC35XX_SDK)
         third_party/hsmddk/include/Kit/EIP201/src/eip201.c
         third_party/hsmddk/include/Kit/Log/src/log.c
         source/ti/drivers/TRNG.c
+        source/ti/drivers/SHA3.c
         source/ti/drivers/trng/TRNGXXF3HSM.c
+        source/ti/drivers/sha3/SHA3XXF3HSM.c
       )
       if(CONFIG_TI_CC35XX_HSM_ITS)
         zephyr_library_sources(
@@ -196,6 +200,7 @@ if(CONFIG_HAS_CC35XX_SDK)
         source/ti/drivers/ECDH.c
         source/ti/drivers/ECDSA.c
         source/ti/drivers/SHA2.c
+        source/ti/drivers/SHA3.c
         source/ti/drivers/cryptoutils/cryptokey/CryptoKeyPlaintext.c
         source/ti/drivers/cryptoutils/hsm/HSMXXF3Utility.c
         source/ti/drivers/aesccm/AESCCMXXF3.c
@@ -205,6 +210,7 @@ if(CONFIG_HAS_CC35XX_SDK)
         source/ti/drivers/ecdh/ECDHXXF3HSM.c
         source/ti/drivers/ecdsa/ECDSAXXF3HSM.c
         source/ti/drivers/sha2/SHA2XXF3HSM.c
+        source/ti/drivers/sha3/SHA3XXF3HSM.c
       )
     endif()
     if(CONFIG_CC35XXE_FWU)

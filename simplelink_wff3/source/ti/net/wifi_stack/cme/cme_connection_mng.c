@@ -2356,8 +2356,6 @@ void cmeWlanConnect(uint32_t aRoleId, CMEWlanConnectCommon_t *apCmd, CMEEapWlanC
     _cme_minimized_wpa_ssid_t *pSsid = NULL;
     cmeScanCandidateDesc_t *pFastCandidate = NULL;
 
-    Bool_e isReassociate = FALSE;
-
 	ASSERT_GENERAL((apCmd!= NULL) || (apEapCmd!=NULL));
 
 

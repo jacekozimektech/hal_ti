@@ -5020,7 +5020,6 @@ void drv_handleRxMngPacket(void *descriptor)
 
                 case WLAN_ACTION_SPECTRUM_MGMT:
                 {
-                    uint8_t* pChannelSwitchIEstart;
                     if (pMngPack->u.action.u.chan_switch.action_code != DOT11_CHANNEL_SWITCH_ACTION_CODE)
                     {
                         GTRACE(GRP_DRIVER_CC33,

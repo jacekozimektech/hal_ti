@@ -2275,7 +2275,7 @@ void cmeApRemovePeer(uint8_t *macAddr, BOOLEAN isUserReq)
 
 #ifdef CONFIG_AP
     struct wpa_supplicant *pApInterface;
-    struct hostapd_data *hapd;
+    struct hostapd_data *hapd = NULL;
     struct sta_info *sta = NULL;
     BOOLEAN isBroadcastMac = FALSE;
 

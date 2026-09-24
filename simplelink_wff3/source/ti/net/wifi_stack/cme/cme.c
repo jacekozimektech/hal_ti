@@ -763,12 +763,10 @@ int32_t cme_get_role_channel(WlanRole_e role, uint16_t *channelNum, uint32_t *ro
 
 int32_t CME_GetTxPower(WlanTxPowerGet_t *params)
 {
-    struct wpa_supplicant *wpa_s;
     WlanTxPowerGet_t *txPowerGet = params;
     ti_driver_ifData_t *pDrv;
     uint32_t roleId;
     int32_t ret;
-    RoleType_e roleType;
     uint32_t role_bitmap = CME_GetStartedRoleBitmap();
 
     /* Check if role is up */

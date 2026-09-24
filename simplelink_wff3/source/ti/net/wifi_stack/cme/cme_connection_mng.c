@@ -4535,6 +4535,7 @@ static void addProfileEap2DB(uint16_t    SecType,
  Return code:   none
 ---------------------------------------------------------------------------- */
 
+#if 0
 static int32_t removeProfileFromDB(uint32_t aProfileId)
 {
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -4581,6 +4582,7 @@ static int32_t removeProfileFromDB(uint32_t aProfileId)
 
 	return 0;
 }
+#endif
 
 
 /* ----------------------------------------------------------------------------

@@ -3185,7 +3185,7 @@ int ti_send_mgmt_frame(void *apPriv,
 
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)apPriv;
     TMgmtPktDesc        *pMgmtPkt;
-    uint32_t            dataLen,total_len, total_len_aligned,extraHThdr;
+    uint32_t            dataLen,total_len,extraHThdr;
     dot11_mgmtHeader_t* pDot11Header;
     uint8_t*            dst_addr;
     uint32_t            uNetIfId = 0;

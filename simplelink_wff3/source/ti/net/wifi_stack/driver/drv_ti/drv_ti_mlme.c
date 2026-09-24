@@ -268,7 +268,6 @@ int32_t ti_drv_txAuthResPacket(ti_driver_ifData_t *apDrv, uint8_t* destAddr, uin
     uint16_t        fc;
 
     dot11_mgmtHeader_t  *pDot11Header;
-    NAB_tx_header_t     *pNabTxHeader;
     uint8_t             authMsg[MAX_AUTH_MSG_LEN] = {0};
 
     authMsg_t           *pAuthMsg;
@@ -1980,6 +1979,5 @@ void markDisconnected(ti_driver_ifData_t *apDrv, uint32_t aCaller)
 	apDrv->associated = FALSE;
 	IRQ_UtilZeroMacAddress(apDrv->currBssid);
 }
-
 
 

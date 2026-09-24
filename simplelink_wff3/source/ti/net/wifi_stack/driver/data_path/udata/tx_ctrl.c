@@ -830,7 +830,6 @@ void *txCtrl_AllocPacketBuffer(TTxCtrlBlk *pPktCtrlBlk, uint32_t uPacketLen)
 ***************************************************************************/
 void txCtrl_FreePacket(TTxCtrlBlk *pPktCtrlBlk, uint32_t eStatus)
 {
-    txCtrl_t *pTxCtrl = gTxCtrlCB;
     uint8_t uDescId  = pPktCtrlBlk->tTxDescriptor.descID;
 
     TX_FRAME_FLOW_CNTRL_PRINT("\n\r txCtrl_FreePacket : 0x%x ", (uint32_t)pPktCtrlBlk);

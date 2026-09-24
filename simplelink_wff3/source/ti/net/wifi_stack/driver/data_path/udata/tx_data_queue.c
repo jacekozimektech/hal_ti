@@ -988,9 +988,11 @@ uint32_t txDataQ_AllocCheckResources (TTxCtrlBlk *pPktCtrlBlk, uint8_t isDataFra
     TDataResources *pDataRsrc = &pTxDataQ->tDataRsrc;
     uint32_t uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
     uint32_t uAc = WMEQosTagToACTable[pPktCtrlBlk->tTxDescriptor.tid];
+#if 0
     Bool_e bPktInUseAboveAcMin = FALSE;
     Bool_e bPktInUseAboveLinkMin = FALSE;
     Bool_e bEnqueuePacket;
+#endif
 
     if(uAc >= MAX_NUM_OF_AC)
     {
@@ -1013,7 +1015,7 @@ uint32_t txDataQ_AllocCheckResources (TTxCtrlBlk *pPktCtrlBlk, uint8_t isDataFra
     /* set RSRC_ALLOCATED flag, used in txDataQ_FreeResources */
     SET_TX_CTRL_FLAG_RSRC_ALLOCATED(pPktCtrlBlk);
 
-/*
+#if 0
     // Update Effective totals = Sum of Max ( PktInUse_PerAc [uAc],  Min_PerAc[uAc] ), uAc=0..MAX_AC
     // no need to calculate Sum of Max on every packet, just small check for this ac only
     if (pDataRsrc->uPktInUsePerAc[uAc] > pDataRsrc->uMinGuaranteePerAc[uAc])
@@ -1063,7 +1065,7 @@ uint32_t txDataQ_AllocCheckResources (TTxCtrlBlk *pPktCtrlBlk, uint8_t isDataFra
         TX_PRINT_ERROR("\n\rerror txDataQ_AllocCheckResources failed");
         return NOK;
     }
-*/
+#endif
     return OK;
 }
 

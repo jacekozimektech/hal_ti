@@ -4616,6 +4616,7 @@ void drv_handleRxMngPacket(void *descriptor)
     type =  WLAN_FC_GET_TYPE(fc); // Frame Type - MGMT(0), CTRL (1), DATA (2)
     stype = WLAN_FC_GET_STYPE(fc);
 
+#ifndef CONFIG_NO_STDOUT_DEBUG
     if((stype != WLAN_FC_STYPE_PROBE_REQ) && (stype != WLAN_FC_STYPE_REASSOC_RESP)//reduce amount of log prints
        && (stype != WLAN_FC_STYPE_BEACON))
     {
@@ -4626,6 +4627,7 @@ void drv_handleRxMngPacket(void *descriptor)
         //wpa_printf(MSG_INFO, "ti_driver: 0ff channel is not allowed! pDrv->freq:%d",pDrv->freq);
 
     }
+#endif
     if (IS_WEP_ON(fc) != 0)
     {
         extraHdr = RSN_SEC_LEN;

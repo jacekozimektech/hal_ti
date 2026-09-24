@@ -1722,11 +1722,10 @@ uint32_t txCtrl_NotifyFwReset (void)
 ***************************************************************************/
 uint32_t txCtrl_CheckForTxStuck (void)
 {
+#ifdef REMOVE_TX_CODE //TODO TX_CODE_WAS_REMOVED
     uint32_t  entry;
     TTxCtrlBlk *pPktCtrlBlk;
     uint32_t  uPktAge;      /* Time in uSec since packet start time. */
-
-#ifdef REMOVE_TX_CODE //TODO TX_CODE_WAS_REMOVED
 
     for (entry = 0; entry < CTRL_BLK_ENTRIES_NUM-1; entry++)
     {

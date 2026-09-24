@@ -9281,9 +9281,6 @@ void cmeP2pGroupRemove()
 #ifndef TI_STA_ONLY_BUILD
 void cmeP2pListen()
 {
-    uint32_t roleId;
-    struct wpa_supplicant *wpa_s = NULL;
-    ti_driver_ifData_t *pDrv = NULL;
     ti_driver_ifData_t *pDevDrv = drv_getDriverData(NETIF_NAME(TIWLAN_DEV_NAME_P2PDEV));
     struct wpa_supplicant *wpas = NULL;
     wpas = pDevDrv->wpa_s;

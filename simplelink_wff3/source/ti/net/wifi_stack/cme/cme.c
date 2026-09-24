@@ -1057,8 +1057,7 @@ int32_t CME_GetScanResults(uint32_t aIndex, uint32_t aCount, uint8_t aGetInterna
 int32_t CME_WlanExtP2pProcessProvDiscActionMsg(WlanActionParam_t* actionBuff, uint8_t requestByHost)
 {
     cmeMsg_t msg;
-    int32_t    status;
-    BOOLEAN  isProfileConnection = FALSE;
+    int32_t status = WLAN_RET_CODE_OK;
 
     if(!isextP2P())
     {

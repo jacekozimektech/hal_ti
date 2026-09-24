@@ -6857,14 +6857,10 @@ int32_t add_preferred_network_common(CMEWlanAddGetProfile_t   *apProfileCmd,
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
 
     _cme_minimized_wpa_ssid_t      *apSsid = NULL;
-    int i;
     int index;
     int16_t flashStatus;
-    int32_t status;
     int8_t *passphrase = NULL;//PROFILE_PASSWORD_STRING(apProfileCmd);
-    int ssid_is_prefix = 0;
     int passphrase_length = apProfileCmd->PasswordLen;
-    int isPassphraseIsPMK = 0;
 
     apSsid = (_cme_minimized_wpa_ssid_t *)os_zalloc(sizeof(_cme_minimized_wpa_ssid_t));
     if (apSsid == NULL)

@@ -7224,6 +7224,7 @@ int16_t cmeAddPreferredNetwork(
     {
         // We need to count free entries in preferredNetworks not in GLX.
         uint8_t freeEntriesNum = CME_SCAN_MAX_PROFILES - getPreferredNetworksDbInfo(preferredNetworks, 0);
+        (void)freeEntriesNum;
 
         GTRACE(GRP_CME, "add_preferred_network: Add profile succeeded, index = %d, free entries number = %d",
                         status, freeEntriesNum);

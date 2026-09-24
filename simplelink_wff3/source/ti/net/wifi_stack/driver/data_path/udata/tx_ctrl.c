@@ -455,8 +455,9 @@ EStatusXmit txCtrl_XmitData(TTxCtrlBlk *pPktCtrlBlk, uint8_t *pBackpressureMap)
     txCtrl_t   *pTxCtrl = gTxCtrlCB;
     ETxnStatus eStatus;       /* The Xfer return value (different than this function's return values). */
     uint32_t  uAc;
-    uint32_t  uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
+#if 0
     ETxHwQueStatus eHwQueStatus;
+#endif
     TPktOriginalAttrib  tOriginalAttrib;
     //CL_TRACE_START_L3();
 
@@ -466,6 +467,8 @@ EStatusXmit txCtrl_XmitData(TTxCtrlBlk *pPktCtrlBlk, uint8_t *pBackpressureMap)
     uAc = WMEQosTagToACTable[pPktCtrlBlk->tTxDescriptor.tid];
 
 #ifdef ENABLE_TRAFFIC_STATITIC
+    uint32_t  uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
+
     if(pTxCtrl->dbgLinkCounters.dbgStartCollectCntr[uHlid])
     {
         pTxCtrl->dbgLinkCounters.dbgTimeFirstPacket_Ms[uHlid] = osi_GetTimeMS();

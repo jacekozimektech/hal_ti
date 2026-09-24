@@ -380,8 +380,6 @@ int32_t ti_drv_txAssocReqPacket(ti_driver_ifData_t *apDrv,
     // Added for correct rates configuration
     Channel_e apChannel;
     uint8_t apBand_temp;
-    int32_t connect_ch = -1;
-    int32_t band24 = -1;
 
     uint8_t band_cfg = l2_GetPhyConfig();
 
@@ -1979,5 +1977,4 @@ void markDisconnected(ti_driver_ifData_t *apDrv, uint32_t aCaller)
 	apDrv->associated = FALSE;
 	IRQ_UtilZeroMacAddress(apDrv->currBssid);
 }
-
 

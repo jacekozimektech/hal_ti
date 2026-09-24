@@ -3119,6 +3119,7 @@ int ti_driver_if_add(void *apPriv, enum wpa_driver_if_type type,
                     const char *bridge, int use_existing, int setup_ap)
 {
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)apPriv;
+    (void)pDrv;
     uint8_t pAddress[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     CME_PRINT_REPORT("\n\rti_driver: Add new interface: type = %d, ifname=%s, force_ifname: %s, drvRoleid=%d",
                 type, ifname, force_ifname, pDrv->roleId);

@@ -3853,8 +3853,6 @@ void cme_Thread(void* apParam)
                         //     in one shot scans initiated by the supplicant mNumProfiles might be equal to zero,
                         //     so in case we get here when supplicant initiated scan is in progress - 
                         //     check if this is the current scan or a periodic scan that runs in parallel.
-                        cmeScanSharedInfo_t*    pCmeScanDB = (cmeScanSharedInfo_t*)scanResultTable_GetCmeScanDbPointer();
-
                         numOfSSID = msg.un.postScanInfo.pSharedInfo->mOneShotProfiles.mNumProfiles;
                         if ((numOfSSID == 0)
                             && (msg.un.postScanInfo.scanType == SCAN_REQUEST_ONE_SHOT)

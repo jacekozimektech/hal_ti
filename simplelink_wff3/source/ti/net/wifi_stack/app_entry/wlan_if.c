@@ -1648,9 +1648,8 @@ int Wlan_Get(WlanGet_e wlanGetType, void *params)
 		break;	
     }
 
-    end:
-        set_finish_wlan_get(wlanGetType);
-        return ret;
+    set_finish_wlan_get(wlanGetType);
+    return ret;
 }
 
 int Wlan_Set(WlanSet_e wlanSetType, void *params)
@@ -2163,7 +2162,6 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             break;
     }
 
-end:
     set_finish_wlan_set(wlanSetType);
     return ret;
 

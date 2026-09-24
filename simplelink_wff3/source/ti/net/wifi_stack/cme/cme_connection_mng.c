@@ -9077,7 +9077,6 @@ void cmeHandleP2pConnection(CMEWlanConnectCommon_t *apCmd, uint32_t aKeyMgmt)
 ---------------------------------------------------------------------------- */
 void cmeP2pConnect(void *apPriv)
 {
-    int32_t ret = 0;
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)apPriv;
     struct wpa_supplicant *wpa_s = pDrv->wpa_s;
     enum p2p_wps_method wps_method = WPS_PBC;
@@ -9101,7 +9100,7 @@ void cmeP2pConnect(void *apPriv)
 	int pd = 0; // Whether to send Provision Discovery prior to GO Negotiation as an
                 // interoperability workaround when initiating group formation
                 // when there is aGO -> pd = 1 may be needed
-	int ht40=0, vht=0, max_oper_chwidth =0 , chwidth = 0, freq2 = 0;
+	int ht40=0, vht=0, max_oper_chwidth =0 , freq2 = 0;
 	int edmg = 0;
 	int he = 0;
 	bool allow_6ghz = false;

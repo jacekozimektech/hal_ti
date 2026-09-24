@@ -724,10 +724,8 @@ int Wlan_EtherPacketSend(WlanRole_e roleType, uint8_t *inbuf, uint32_t inbuf_len
 {
     TTxCtrlBlk *pPktCtrlBlk;
     uint32_t uNetIfId;
-    uint8_t *internalFrame;
     int status;
-    uint64_t current_sample, diff;
-    uint32_t current_data, dataLen,total_len;
+    uint32_t dataLen,total_len;
     TEthernetHeader* pEthHead = NULL;
     uint32_t    uHlid;
 

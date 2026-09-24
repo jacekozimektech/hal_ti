@@ -4433,7 +4433,6 @@ void cme_Thread(void* apParam)
                         uint8_t *bssidAddr  = pDrv->currBssid;
 
                         WlanEventConnecting_t*  pArgs;
-                        uint8_t band;
 
                         //update the newly connected bssid
                         os_memcpy(gCmeLastConnectedBssId, bssidAddr, MAC_ADDR_LEN);

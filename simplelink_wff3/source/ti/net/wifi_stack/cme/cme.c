@@ -2168,7 +2168,6 @@ int32_t CME_AddProfile(CMEWlanAddGetProfile_t* new_profile)
     cmeMsg_t   msg;
     int32_t    status;
     int16_t    index;
-    BOOLEAN    isProfileConnection = TRUE;
     const CMEWlanAddGetProfile_t *cme_wlan_add_profile_args = new_profile;
     uint32_t keyMgmtType;    
 

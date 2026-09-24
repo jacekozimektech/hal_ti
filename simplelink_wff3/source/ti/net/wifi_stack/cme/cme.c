@@ -553,6 +553,7 @@ static Bool32 isRxMgmtFrameSafeToFilter (void *descriptor);
 int32_t cmeMsgQueueCleanup (void);
 int32_t cmeMsgQueueCleanupAll (void);
 static int32_t validateWlanConnectParams(CMEWlanConnectCommon_t *apCmd);
+#if CC35XX_ADD_SUPPORT_ENT_PROFILE
 static int32_t cme_validate_eap_connection_params(uint8_t  SsidLen,
                                                   uint8_t  PasswordLen,
                                                   uint8_t  UserLen,
@@ -560,12 +561,11 @@ static int32_t cme_validate_eap_connection_params(uint8_t  SsidLen,
                                                   uint8_t  CertIndex,
                                                   uint32_t EapBitmask,
                                                   uint8_t  do_validate_role);
+#endif
 
 static BOOLEAN isSameConnectParamsInProgress(CMEWlanConnectCommon_t *pCmdbuffer, CMEEapWlanConnect_t *pConnectEapCmd);
 
 
-static cmePrivateIeCB_t* getPrivateIeWorkingCopy(void);
-static void freePrivateIeWorkingCopy(cmePrivateIeCB_t* pWorkingCopy);
 void CME_supplicantPeriodicTimerKick(void);
 void CME_supplicantPeriodicActivities(void);
 void CME_MsgFree(cmeMsg_t *apMsg);

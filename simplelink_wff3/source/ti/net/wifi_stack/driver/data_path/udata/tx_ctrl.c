@@ -625,7 +625,9 @@ uint32_t txCtrl_XmitMgmt(TTxCtrlBlk *pPktCtrlBlk, uint8_t *pBackpressureMap)
     uint32_t    uAc;  /* The AC selected for the packet transmission. */
     uint32_t    uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
     uint8_t     uPktType = pPktCtrlBlk->tTxPktParams.uPktType;
+#if 0
     ETxHwQueStatus eHwQueStatus;
+#endif
     TPktOriginalAttrib  tOriginalAttrib;
 
     UDATA_PRINT("\n\rtxCtrl_XmitMgmt : receive packet to send");

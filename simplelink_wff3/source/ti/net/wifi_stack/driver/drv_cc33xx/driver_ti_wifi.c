@@ -2454,12 +2454,7 @@ int ti_driver_ext_tx_send_action(
     ti_driver_ifData_t     *pDrv;
     struct wpa_supplicant *wpa_s = NULL;
     uint32_t roleId;
-    struct ieee80211_mgmt  mgmt;
-    uint8_t *apSrc;
-    int32_t freq;
-    uint32_t aWaitTime ;//ms
     int32_t ret = 0;
-    uint8_t* apBssid;
 
 
     osi_LockObjLock(&extAppLockObj, OSI_WAIT_FOREVER);

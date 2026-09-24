@@ -1779,9 +1779,6 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
         case WLAN_SET_VENDOR_IE:
         {
             wlanSetVendorInfo_t *VendorInfo = (wlanSetVendorInfo_t *)params;
-            int roleId;
-            ti_driver_ifData_t * pDrv;
-            uint8_t * pVendorElements;
             RoleType_e RoleType;
             //for STA: vendor IE will appear on ASSoc-request
             //For AP : BEACON + PROBE_RESP +ASSOCI response

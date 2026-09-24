@@ -3946,7 +3946,9 @@ static void addProfileEap2DB(uint16_t    SecType,
                              uint8_t     FastTransition,
                              cmeProfileInfo_t * inputProfile)
 {
+#if 0
     int32_t i;
+#endif
     //get shared input commands
     int32_t fast_provisioning                   = 0; //not supported
     cmeEntProfileParams_t *eap_profile_entry=NULL;

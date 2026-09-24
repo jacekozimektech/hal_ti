@@ -6260,7 +6260,6 @@ int locateAndFillStandardNetwork(int scan_ssid,
     int currentProfileIndex;
     int selectedProfileIndex = CME_SCAN_MAX_PROFILES;
     cmeProfileInfo_t *pCurrentMatchedProfile;
-    int wep_key_len = key_len_and_id & 0xFF;
 
     //Check if the added new profile is already configured in the preferredNetworks DB.
     //We will check the new profile existence even if the selectedProfileIndex above shows that there is no free index for this new profile.
@@ -6278,6 +6277,7 @@ int locateAndFillStandardNetwork(int scan_ssid,
             {
 
 #ifdef C35XX_PROFILE_CHECK_BSSID_AND_SECURITY_TO_REMOVE //?
+                int wep_key_len = key_len_and_id & 0xFF;
 
 #ifdef SL_PROFILE_STRUCT_REDUCTION
                 //Check if ssid prefix needed and if so if already exists

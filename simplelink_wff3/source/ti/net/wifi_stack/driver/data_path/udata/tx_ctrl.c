@@ -972,7 +972,7 @@ static void txCtrl_TxCompleteCb(TTxResultInfo *pTxResultInfo, uint32_t counter)
         /* For STA/P2PCL role data packets */
         if ((IS_PKT_TYPE_IF_ROLE_STA(pPktCtrlBlk) || IS_PKT_TYPE_IF_ROLE_P2PCL(pPktCtrlBlk)) && TRUE == bIsDataPkt)
         {
-            if (pTxCtrl->TSMInProgressBitmap && (0x01 << pPktCtrlBlk->tTxDescriptor.tid))
+            if (pTxCtrl->TSMInProgressBitmap & (0x01 << pPktCtrlBlk->tTxDescriptor.tid))
             {
                 txCtrl_UpdateTSMDelayCounters(&pTxResultInfo[i], pPktCtrlBlk->tTxDescriptor.tid);
             }
@@ -1866,4 +1866,3 @@ uint32_t txCtrl_UpdateTSMParameters(uint32_t uHlid, TTsmParams *pTSMParams)
 
     return OK;
 }
-

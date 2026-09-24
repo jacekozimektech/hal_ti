@@ -379,7 +379,6 @@ void txDataQ_SetClsfrInitParams(TClsfrInitParams   *ClsfrInitParam)
  */
 uint32_t txDataQ_Set(TUdataInitParams TUdataParams)
 {
-    TTxDataQ  *pTxDataQ = gTxDataQCB;
     uint32_t  eStatus;
 
     /* configure the classifier sub-module */
@@ -1793,4 +1792,3 @@ static void txDataQ_TxSendPaceTimeout (Bool_e bTwdInitOccured)
 
     txDataQ_ReqToRunTxScheduler();
 }
-

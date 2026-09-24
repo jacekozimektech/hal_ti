@@ -4695,6 +4695,7 @@ static int shouldConnectToOpenAp()
     return (!cme_is_p2p_role_configured() && (gCmeConnectionPolicyParams_ull.shouldConnectToOpenAp));
 }
 
+#if CC35XX_SUPPORT_P2P_PROFILE
 static int shouldConnectToAnyP2Pdevice()
 {
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
@@ -4702,6 +4703,7 @@ static int shouldConnectToAnyP2Pdevice()
     return (cme_is_p2p_role_configured() && (gCmeConnectionPolicyParams_ull.shouldConnectToAnyP2P));
 
 }
+#endif /* CC35XX_SUPPORT_P2P_PROFILE */
 //
 // getPreferredNetworksDbInfo
 //

@@ -4784,7 +4784,6 @@ void drv_handleRxMngPacket(void *descriptor)
             dot11_POWER_CONSTRAINT_t *pPowerConstraintIE;
             dot11_CELL_TP_t *pDtpcIE;
             dot11HeMuEdcaAcParams_t *pHeMuEdcaParamsIE = NULL;
-            dot11_ACParameters_t *pAcParameters = NULL;
             dot11_WME_PARAM_t *pWmmParamIE = NULL;
             uint32_t* pIE_addr_table = NULL;
             uint32_t* pIE_extension_addr_table = NULL;
@@ -4836,7 +4835,6 @@ void drv_handleRxMngPacket(void *descriptor)
             if(pHeMuEdcaParamsIE && (pDrv->connected))
             {
                 int ac;
-                int changed = 0 ;
                 for(ac = 0; ac < NUM_ACCESS_CATEGORIES; ac++)
                 {
                     if (os_memcmp(pDrv->apHeMuEdcaAcParams[ac]._byte, pHeMuEdcaParamsIE->heMuEdcaAcParamsIe[ac]._byte,HE_MU_EDCA_FIELD_BYTES) != 0)
@@ -4858,7 +4856,6 @@ void drv_handleRxMngPacket(void *descriptor)
             if(pWmmParamIE && (pDrv->connected))
             {
                 int ac;
-                int changed = 0 ;
                 if(os_memcmp(&(pDrv->apAcParameters), &(pWmmParamIE->WME_ACParameteres), sizeof(dot11_ACParameters_t)) != 0)
                 {
                     setWmeSiteParams(pWmmParamIE, &pDrv->assocParams);

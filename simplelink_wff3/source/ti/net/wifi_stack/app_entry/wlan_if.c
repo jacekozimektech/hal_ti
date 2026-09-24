@@ -1021,7 +1021,6 @@ int  Wlan_Stop(uint32_t flags)
 int Wlan_RoleUp(WlanRole_e roleType, void *params, unsigned long int timeout)
 {
     int ret = 0;
-    uint32_t role_bitmap;
 
 #ifndef TI_STA_ONLY_BUILD
     if(roleType == WLAN_ROLE_AP)
@@ -1058,7 +1057,6 @@ int Wlan_RoleUp(WlanRole_e roleType, void *params, unsigned long int timeout)
 
 int Wlan_RoleDown(WlanRole_e roleType, unsigned long int timeout)
 {
-    uint32_t role_bitmap;
     int32_t ret = 0;
 
     HOOK(HOOK_WLAN_IF);

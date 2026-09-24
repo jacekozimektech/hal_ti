@@ -1871,7 +1871,7 @@ static uint32_t sendDataPacketToTx(void *pBuffer, uint16_t uLength, uint32_t uHl
         return NOK;
     }
 
-    pData = pBuffer + ETHERNET_HDR_LEN;
+    pData = (uint8_t *)pBuffer + ETHERNET_HDR_LEN;
     pEthHead  = os_malloc(sizeof(TEthernetHeader));
     if (!pEthHead)
     {

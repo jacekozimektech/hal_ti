@@ -71,8 +71,6 @@
 extern void _recvNetworkPacket(uint32_t netifid,uint8_t *inbuf, uint32_t inbuf_len);
 
 static int rxData_RequestForBuffer (uint8_t **pBuf, uint32_t aLength);
-/* CallBack for recieving FwLogger packet from rxXfer (continuous mode) or FwLog (OnDemand mode) */
-static void rxData_ReceiveFwLoggerPacket (void  *pBuffer, uint32_t uLength, uint8_t fwLogMode, Bool_e RecoveryReading);
 
 static uint32_t rxData_ConvertWlanToEthHeader(void *pBuffer, uint16_t *etherType);
 static uint32_t rxData_ConvertAmsduToEthPackets(void *pBuffer,ELinkState eLinkConnState);
@@ -1923,4 +1921,3 @@ static uint32_t sendDataPacketToTx(void *pBuffer, uint16_t uLength, uint32_t uHl
     fail:
         return status;
 }
-

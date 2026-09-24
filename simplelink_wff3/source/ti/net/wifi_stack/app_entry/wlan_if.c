@@ -2171,7 +2171,7 @@ int Wlan_ProfileAdd(const signed char *pName, const int NameLen, const unsigned 
                      const WlanSecParams_t* pSecParams, const WlanSecParamsExt_t* pSecExtParams,
                      const uint32_t Priority, const uint8_t Hidden, const uint32_t Options)
 {
-    int ret;
+    int ret = -1;
     int alloc_size = 0;
     CMEWlanAddGetProfile_t *params;
     uint8_t PassLen = 0;

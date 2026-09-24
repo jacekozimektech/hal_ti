@@ -2499,8 +2499,6 @@ int32_t CME_setPeerAgingTimeout(uint32_t agingTimeOut)
     HOOK(HOOK_IN_CME);
 
     cmeMsg_t msg;
-    uint8_t* pVendorIE = NULL;
-    int32 ret;
 
     msg.msgId = CME_MESSAGE_ID_CONFIGURE_PEER_AGING_TIMEOUT ;
     msg.un.peerAgingTimeout = agingTimeOut;

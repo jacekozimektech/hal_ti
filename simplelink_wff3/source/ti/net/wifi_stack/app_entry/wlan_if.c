@@ -1693,28 +1693,28 @@ int Wlan_Set(WlanSet_e wlanSetType, void *params)
             }
 
             if(WLAN_ROLE_STA == pMacParams->roleType &&
-                    1 == (role_bitmap & BIT_x(ROLE_STA)))
+                    0 != (role_bitmap & BIT_x(ROLE_STA)))
             {
                 ret = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__COMMANDS, WLAN_ERROR_TYPE__SET_MAC_ROLE_STA);
                 break;
             }
 
             else if(WLAN_ROLE_AP == pMacParams->roleType &&
-                    1 == (role_bitmap & BIT_x(ROLE_AP)))
+                    0 != (role_bitmap & BIT_x(ROLE_AP)))
             {
                 ret = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__COMMANDS, WLAN_ERROR_TYPE__SET_MAC_ROLE_AP);
                 break;
             }
 
             else if(WLAN_ROLE_P2P_GO == pMacParams->roleType &&
-                    1 == (role_bitmap & BIT_x(ROLE_P2P_GO))) 
+                    0 != (role_bitmap & BIT_x(ROLE_P2P_GO)))
             {
                 ret = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__COMMANDS, WLAN_ERROR_TYPE__SET_MAC_ROLE_P2P);
                 break;
             }
 
-            else if(ROLE_DEVICE == pMacParams->roleType &&
-                    1 == (role_bitmap & BIT_x(ROLE_DEVICE)))
+            else if(WLAN_ROLE_DEVICE == pMacParams->roleType &&
+                    0 != (role_bitmap & BIT_x(ROLE_DEVICE)))
             {
                 ret = WlanError(WLAN_ERROR_SEVERITY__LOW, WLAN_ERROR_MODULE__COMMANDS, WLAN_ERROR_TYPE__SET_MAC_ROLE_DEVICE);
                 break;

@@ -1592,14 +1592,16 @@ static void txCtrl_UpdateTxCounters(TTxResultInfo *pTxResultInfo,
                                     uint32_t ac,
                                     Bool_e bIsDataPkt)
 {
+#ifdef ENABLE_TRAFFIC_STATITIC
     txCtrl_t *pTxCtrl = gTxCtrlCB;
     uint32_t  pktLen;
     uint32_t  dataLen;
     uint32_t  uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
-    
+
     pktLen = (uint32_t)pPktCtrlBlk->tTxDescriptor.length-sizeof(TxIfDescriptor_t);//(uint32_t)ENDIAN_HANDLE_WORD(pPktCtrlBlk->tTxDescriptor.length);
     //pktLen = pktLen << 2;//convert words to bytes
-    
+#endif
+
     /* If it's not a data packet, exit (the formal statistics are only on network stack traffic). */
     if ( !bIsDataPkt )
     {

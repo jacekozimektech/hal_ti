@@ -97,8 +97,9 @@ int wpas_wps_eapol_cb(struct wpa_supplicant *wpa_s)
     }
     /***********************************************/
 
-    if (wpas_p2p_wps_eapol_cb(wpa_s) > 0)
+    if (wpas_p2p_wps_eapol_cb(wpa_s) > 0) {
         return 1;
+    }
 
 	if (!wpa_s->wps_success &&
 	    wpa_s->current_ssid &&

@@ -1328,15 +1328,19 @@ static void txCtrl_BuildMgmtPkt(TTxCtrlBlk *pPktCtrlBlk, uint32_t uAc)
         dot11_mgmtHeader_t *wlanHeader = (dot11_mgmtHeader_t *)&(pPktCtrlBlk->aPktHdr[hdrPadding]);
         if (IS_AUTH(wlanHeader->fc)) {
             ACXInConnectionSTA_t param;
+#if 0
             uint32_t eStatus;
+#endif
             os_memcpy(param.mac_address, wlanHeader->DA ,TIW_DRV_MAC_ADDR);
             param.RoleID = pPktCtrlBlk->tTxPktParams.uFwRoleId;
 
-            //TODO
-            //eStatus = TWD_SendInfoEle(ACX_UPDATE_INCONNECTION_STA_LIST, (void*)&param, sizeof(param), NULL, NULL);
+#if 0
+            /* TODO */
+            eStatus = TWD_SendInfoEle(ACX_UPDATE_INCONNECTION_STA_LIST, (void*)&param, sizeof(param), NULL, NULL);
 
-            //Report("\n\r txCtrl_BuildMgmtPkt ,set in-connection state status %d " REPORT_MACSTR "\r\n",
-            //       eStatus, REPORT_MAC2STR(param.mac_address));
+            Report("\n\r txCtrl_BuildMgmtPkt ,set in-connection state status %d " REPORT_MACSTR "\r\n",
+                   eStatus, REPORT_MAC2STR(param.mac_address));
+#endif
         }
     }
 

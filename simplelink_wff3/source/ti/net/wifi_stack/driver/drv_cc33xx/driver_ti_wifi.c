@@ -3036,8 +3036,6 @@ int ti_driver_cancel_remain_on_channel(void *apPriv)
 {
     HOOK(HOOK_IN_DRIVER_TI_WIFI);
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)apPriv;
-    Channel_e chan;
-    uint8_t/*RadioBand_e*/ band;
 
     //wpa_printf(MSG_ERROR, "ti_driver: lock3");
     osi_LockObjLock(&g_offChannelDev.p_remain_channel_mutex , OSI_WAIT_FOREVER);

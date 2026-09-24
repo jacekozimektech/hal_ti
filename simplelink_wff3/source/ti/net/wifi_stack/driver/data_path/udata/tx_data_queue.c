@@ -1144,7 +1144,6 @@ void txDataQ_FreeFwAllocated (TTxCtrlBlk *pPktCtrlBlk)
 {
     TTxDataQ *pTxDataQ = gTxDataQCB;
     TDataResources *pDataRsrc = &pTxDataQ->tDataRsrc;
-    uint32_t uHlid = pPktCtrlBlk->tTxDescriptor.hlid;
     uint32_t uAc = WMEQosTagToACTable[pPktCtrlBlk->tTxDescriptor.tid];
 
     /* Enter critical section to protect classifier data and queue access */

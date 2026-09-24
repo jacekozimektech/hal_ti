@@ -7068,7 +7068,9 @@ int16_t cmeAddPreferredNetwork(
     HOOK(HOOK_IN_CME_CONNECTION_MNG);
 
     int16_t status =  -1;
+#if 0
     uint8_t auth_alg;
+#endif
     CMEWlanAddGetProfile_t *cme_wlan_add_profile_args = pProfile;//(sl_wlan_add_profile_cmd_t *)&pScmd->func_args_start;
 
     //read preferred network from FS

@@ -100,7 +100,9 @@ uint32_t gErrorNullBlk = 0;
 /* Internal Functions prototypes */
 static void txDataQ_RunScheduler (void* hCbHndl);
 static void txDataQ_TxSendPaceTimeout (Bool_e bTwdInitOccured);
+#ifdef TI_DBG
 static void txDataQ_PrintResources (void);
+#endif
 static void txDataQ_InitResources (void);
 static void scheduleQueuesPerPriority( int32_t *pCountTxDataFrames);
 

@@ -2246,7 +2246,6 @@ int ti_driver_ext_set_CROC(uint8_t calledFromCmeThread,uint32_t is_croc_performe
 {
     int32_t roleId, ret= 0;
     struct wpa_supplicant *wpa_s;
-    uint8_t roleid = ROLE_DEVICE;
 
     CME_PRINT_REPORT("\r\nti_driver_ext_set_CROC , calledFromCmeThread :%d\r\n",calledFromCmeThread);
 

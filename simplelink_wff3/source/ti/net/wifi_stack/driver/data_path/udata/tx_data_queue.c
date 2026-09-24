@@ -1404,12 +1404,13 @@ static void txDataQ_PrintResources (void)
 static void txDataQ_RunScheduler (void* hCbHndl)
 {
     TTxDataQ   *pTxDataQ = gTxDataQCB;
-    TDataResources *pDataRsrc = &pTxDataQ->tDataRsrc; //add- on for debug
     uint32_t watchDogcount = 0;
     int32_t retVal = 0;
     // Read the current counter of request schedule calls
 
 #ifdef DEBUG_TX_QUEUE_TABLE
+    TDataResources *pDataRsrc = &pTxDataQ->tDataRsrc; //add- on for debug
+
     gErrorBusy = 0;
     gErrorFailed = 0;
     gErrorNullBlk = 0;

@@ -939,7 +939,6 @@ int32_t ti_drv_txDeauthDisassocPacket(ti_driver_ifData_t *apDrv,
     uint32_t            payloadSize,total_len,extraHThdr;
     uint16_t            fc;
     dot11_mgmtHeader_t  *pDot11Header;
-    uint8_t             authMsg[MAX_AUTH_MSG_LEN] = {0};
     OsiReturnVal_e      osiRetVal;
     char macStrSA[MAC_STR_LEN], macStrDA[MAC_STR_LEN];
     uint8_t             SecureHdrLength = 0;

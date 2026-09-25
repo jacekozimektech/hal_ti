@@ -3608,8 +3608,6 @@ int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned 
 
 void WlanEventHandler(void *pWlanFwEvent)
 {
-    void *staif = NULL;
-
     if(!pWlanFwEvent)
     {
         CME_CC3XX_PORT_PRINT_ERROR("\n\rERROR [WLAN FW EVENT HANDLER] error pWlanFwEvent is NULL\n\r");

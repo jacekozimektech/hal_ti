@@ -493,7 +493,6 @@ cmeScanCandidateDesc_t* scanCandidateTable_GetBySsidBssidPair (char *pSsid, uint
 void*  scanDigestTable_GetBySsidBssidPair (char *pSsid, uint32_t ssidLen, const uint8_t *pBssid)
 {
     uint32_t                  uIndex;
-    uint16_t  ScanMemSize;
     cmeScanSharedInfo_t *pCmeScanDb = scanResultTable_GetCmeScanDbPointer();
 
     if (TRUE == pCmeScanDb->extendedScanResults)
@@ -856,7 +855,6 @@ void scanDigestTable_SaveResult(TScanFrameInfo*            pFrame,
 
 {
     uint32_t secType;
-    uint16_t ieLen;
     //update channel;
     pEntry->result.mChannel = pFrame->pParsedIEs->dsParams.currChannel;
 

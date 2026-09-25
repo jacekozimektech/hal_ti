@@ -3334,7 +3334,7 @@ int cc3xxx_trnspt_cmd_if_sta_remove(void *apPriv, const uint8_t *apAddr)
 int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned int total_flags,
                          unsigned int flags_or, unsigned int flags_and)
 {
-    int                     rc;
+    int                     rc = 0;
     CommandParamContol_t    cmd;
     CommandComplete_t       cmdComplete;
     uint16_t                retVal;

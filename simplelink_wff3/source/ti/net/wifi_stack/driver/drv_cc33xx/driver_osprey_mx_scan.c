@@ -294,7 +294,7 @@ int8_t mx_driver_ssid_match(dot11_SSID_t*      apSsidIe,
 ******************************************************************************/
 Bool_e  mx_driver_FilterWpsP2p(uint32_t aRoleId, uint8_t* payloadStart, uint16_t payloadLength)
 {
-    Bool_e  findWps, findP2p;
+    Bool_e  findWps = FALSE, findP2p = FALSE;
     Bool_e  toDrop = FALSE;
     uint8*  pDot11Wps;
     uint8*  pDot11P2p;

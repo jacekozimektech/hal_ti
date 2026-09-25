@@ -1567,7 +1567,6 @@ int ctrlCmdFw_GetChannelUtilizationResults(WlanChannel_utilize_res_t* res)
 {
     cmd_interrogate_get_channel_utilization_results_t cmdGetScanCUResult;
     CommandComplete_t cmdComplete;
-    WlanChannel_utilize_res_t *channel_util = NULL;
     int ret;
 
     cmdGetScanCUResult.cmdInterrogateHeader.id = GET_LATEST_CHANNEL_UTILIZATION_SURVEY;

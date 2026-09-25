@@ -569,8 +569,10 @@ static BOOLEAN isSameConnectParamsInProgress(CMEWlanConnectCommon_t *pCmdbuffer,
 void CME_supplicantPeriodicTimerKick(void);
 void CME_supplicantPeriodicActivities(void);
 void CME_MsgFree(cmeMsg_t *apMsg);
-static void cme_debug_print_cME_queue_content();
+#ifdef CME_MSG_QUEUE_DEBUG
+static void cme_debug_print_cME_queue_content(cmeMsg_t *apMsg);
 static void debug_print_msg_type_subtype(cmeMsg_t* msg);
+#endif /* CME_MSG_QUEUE_DEBUG */
 int32_t cme_update_ap_beacon_tx_power(ti_driver_ifData_t *pDrv, uint32_t roleId, int8_t tx_power);
 int32_t cme_get_role_channel(WlanRole_e role, uint16_t *channelNum, uint32_t *roleId);
 
@@ -6236,6 +6238,7 @@ int16 CME_WlanApRemovePeer(CMEWlanApRemovePeer_t *pCmdRemovePeer)
     return status;
 }
 
+#ifdef CME_MSG_QUEUE_DEBUG
 static void debug_print_msg_type_subtype(cmeMsg_t* msg)
 {
     if(msg->msgId == CME_MESSAGE_ID_RX_MNG_PACK)
@@ -6257,8 +6260,9 @@ static void debug_print_msg_type_subtype(cmeMsg_t* msg)
     }
 }
 
-static void cme_debug_print_cME_queue_content()
+static void cme_debug_print_cME_queue_content(cmeMsg_t *apMsg)
 {
+    (void)apMsg;
     //for debug purpose, this is left open, will be undef later on
     //the code shouldn't come into this place, we need to drop packet that are not relevant
     //before
@@ -6307,3 +6311,4 @@ static void cme_debug_print_cME_queue_content()
         }
     }//for
 }
+#endif /* CME_MSG_QUEUE_DEBUG */

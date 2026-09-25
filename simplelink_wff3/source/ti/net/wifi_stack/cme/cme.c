@@ -5157,7 +5157,6 @@ void cme_Thread(void* apParam)
     }
 
     } //while(gContRunThrdLoopCme)
-exit:
     CME_PRINT_REPORT("\n\r cme_Thread: exit from thread loop !!");
     if (OSI_OK!=osi_SyncObjSignal(&gThrdLoopStoppedCmeSync))
     {

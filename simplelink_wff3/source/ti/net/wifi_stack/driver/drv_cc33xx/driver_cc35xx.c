@@ -2223,8 +2223,8 @@ int cc3xxx_trnspt_cmd_if_one_shot_scan(void *apPriv, struct wpa_driver_scan_para
     }
 
     // For p2p related we use ssid scan if FW
-    if ((ROLE_IS_TYPE_P2P_CLIENT(apDrv->roleType) || (ROLE_IS_TYPE_DEVICE(apDrv->roleType)) 
-        && (apParams->num_ssids > 0)))
+    if ((ROLE_IS_TYPE_P2P_CLIENT(apDrv->roleType) || ROLE_IS_TYPE_DEVICE(apDrv->roleType)) &&
+        (apParams->num_ssids > 0))
     {
         if(apParams->ssids[0].ssid_len > 0)
         {

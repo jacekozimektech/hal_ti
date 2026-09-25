@@ -960,7 +960,7 @@ int32_t ti_drv_txDeauthDisassocPacket(ti_driver_ifData_t *apDrv,
 
     if (INVALID_LINK == link)
     {
-        MLME_REPORT_PRINT_ERROR("\n\rERROR ti_drv_txDeauthDisassocPacket: ERROR unsupported link id %d \n\r", pkt->link);
+        MLME_REPORT_PRINT_ERROR("\n\rERROR ti_drv_txDeauthDisassocPacket: ERROR unsupported link id %d \n\r", link);
         GTRACE(GRP_DRIVER_CC33, "ti_drv_txDeauthDisassocPacket: ERROR No valid hlid was found!  NetifId = %d", link);
         return NOK;
     }

@@ -5938,7 +5938,6 @@ void ti_driver_p2p_find_stopped(struct wpa_supplicant *wpa_s)
 void ti_driver_p2p_group_formation_failure(struct wpa_supplicant *wpa_s)
 {
     ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
-    uint32_t roleId;
 
     //clean bit. connection stopped with failure
     CME_PRINT_REPORT("\n\r ti_driver : P2P Group Formation FAILED roleid=%d, roleType = %d, if_name = %s",

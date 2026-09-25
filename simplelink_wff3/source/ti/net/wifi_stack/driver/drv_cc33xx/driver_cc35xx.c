@@ -3387,7 +3387,7 @@ int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned 
 
         // Use addr field in sta_info struct to get a pointer to the container of it.
         size_t memberOffset = offsetof(struct sta_info, addr);
-        struct sta_info *staInfo = (struct sta_info *)((void *)apAddr - memberOffset);
+        struct sta_info *staInfo = (struct sta_info *)((const uint8_t *)apAddr - memberOffset);
         uint8_t wps = 0;
 
         // Extract WPS flag from sta_info struct in order to detect a WPS connection attempt

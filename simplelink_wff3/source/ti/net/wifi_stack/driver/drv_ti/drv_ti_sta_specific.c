@@ -1537,7 +1537,7 @@ void ti_drv_setApInfo(ti_driver_ifData_t    *apDrv,
     int32_t rc;
 
     // Post association configuration param
-    uint8_t *muEcdaPos;
+    uint8_t *muEcdaPos = NULL;
     heBssCap_t heBssCap = {0};
 
     apDrv->link = 0;

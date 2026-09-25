@@ -1100,7 +1100,7 @@ int SendCalibrationCmd(FILE *calibrationFile, uint32_t offset, uint16_t payloadL
         cmdSize = sizeof(static_calibration_cmd_t);
     }
 
-    ALIGNN_TO_4(cmdSize);
+    cmdSize = ALIGNN_TO_4(cmdSize);
 
     cmd = os_malloc(cmdSize);
 

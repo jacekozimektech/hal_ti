@@ -2719,7 +2719,7 @@ uint32_t scan_result_calc_weighted_score(TScanFrameInfo* scanInfo, EScanRequestT
 {
     uint32_t      total_score  = 0;
     uint32_t      par_id = 0;
-    uint16_t      priority_score, par_score;
+    uint16_t      priority_score = 0, par_score;
 
     HOOK(HOOK_IN_SCAN_RESULT_TABLE);
 

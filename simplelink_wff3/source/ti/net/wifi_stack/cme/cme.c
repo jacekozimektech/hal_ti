@@ -2601,7 +2601,7 @@ int32_t CME_EapolTxResult(void *desc)
 int32_t CME_TxResult(void *desc)
 {
     cmeMsg_t msg;
-    volatile CmeTxDesc_t *pDesc;
+    volatile CmeTxDesc_t *pDesc = NULL;
     struct MgmtPktDesc* pRecDesc;
     TMgmtPktReport* pMgmDesc =  (TMgmtPktReport*)desc;
     struct ieee80211_mgmt *pMngPack;

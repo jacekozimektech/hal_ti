@@ -3091,8 +3091,6 @@ void cme_Thread(void* apParam)
 {
     HOOK(HOOK_IN_CME);
 
-    uint32_t requested_active_role  = 0;
-    
     int32_t            eloopTimeout;
     uint32_t           timeoutMs = 0xFFFFFFFF;
     cmeMsg_t           msg;
@@ -3100,7 +3098,6 @@ void cme_Thread(void* apParam)
     int role_switch_rc;
     volatile BOOLEAN running;
 
-    int32_t peerStatus;
     BOOLEAN sendInternalEvent = FALSE;
     BOOLEAN bRemovePeerNeeded = FALSE;
 

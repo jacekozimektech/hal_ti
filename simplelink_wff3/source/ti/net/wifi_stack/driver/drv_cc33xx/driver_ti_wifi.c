@@ -5403,7 +5403,6 @@ void drv_handleRxEapol(void *aDesc)
     union wpa_event_data eventData;
 	TEthernetHeader *pHdr;
     uint32_t headerSize = 0;
-    uint8_t  headerAlignment = 0;
 
 
     /* Get the mac header location in the packet Buffer */

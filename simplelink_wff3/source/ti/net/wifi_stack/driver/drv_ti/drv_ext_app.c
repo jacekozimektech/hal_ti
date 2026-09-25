@@ -1818,7 +1818,6 @@ int32_t extWpsConnectAfter(uint8_t *ssid, uint32_t ssidLen, uint16_t secType, ui
 ******************************************************************************/
 uint32_t extWpsIsLinkWps(uint32_t hlid, uint8_t *netifId)
 {
-    tiwdrv_if_mode_e netifMode = 0;
     TInternalWlanLinkInfo *linkInfo;
     
     uint32_t ret = FALSE;

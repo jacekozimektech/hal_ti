@@ -2625,7 +2625,7 @@ static mbedtls_ecp_group_id crypto_mbedtls_ecp_group_id_from_ike_id(int group)
 }
 
 #ifdef CRYPTO_MBEDTLS_CRYPTO_EC
-static int crypto_mbedtls_ike_id_from_ecp_group_id(mbedtls_ecp_group_id grp_id)
+static int __maybe_unused crypto_mbedtls_ike_id_from_ecp_group_id(mbedtls_ecp_group_id grp_id)
 {
     /* https://www.iana.org/assignments/ikev2-parameters/ikev2-parameters.xhtml */
     /*(for crypto_ec_key_group())*/
@@ -5120,6 +5120,7 @@ int rc4_skip(const u8 *key, size_t keylen, size_t skip,
 
 /* duplicated in tls_mbedtls.c:tls_mbedtls_readfile()*/
 
+#if defined(CRYPTO_MBEDTLS_CRYPTO_RSA) && defined(MBEDTLS_RSA_C)
 static int crypto_mbedtls_readfile(const char *path, u8 **buf, size_t *n)
 {
   #if 0 /* #ifdef MBEDTLS_FS_IO */
@@ -5149,7 +5150,7 @@ static int crypto_mbedtls_readfile(const char *path, u8 **buf, size_t *n)
   #endif
     return 0;
 }
-
+#endif
 
 #ifdef CRYPTO_MBEDTLS_CRYPTO_RSA
 #ifdef MBEDTLS_RSA_C

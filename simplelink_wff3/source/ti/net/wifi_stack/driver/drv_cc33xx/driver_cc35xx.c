@@ -3344,7 +3344,6 @@ int cc3xxx_trnspt_cmd_if_sta_set_flags(void *apPriv, const u8 *apAddr, unsigned 
     AddPeerCmd_t            *pPrevCmd; //Previous in link list (NULL if pStaParams is first)
     Bool_e                  foundCmd = FALSE;
     uint32_t                uAcId;
-    uint32_t                supportedRatesMask, basicRatesMask;
 
     if (NULL == apAddr)
         return -1;

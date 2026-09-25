@@ -3667,7 +3667,9 @@ int32_t cc3xxx_set_defaults()
 ******************************************************************************/
 int cc3xxx_config_mem_map()
 {
+#if 0
     MemoryMap_t             tMemMap;
+#endif
     int ret = 0;
 
 #if 0

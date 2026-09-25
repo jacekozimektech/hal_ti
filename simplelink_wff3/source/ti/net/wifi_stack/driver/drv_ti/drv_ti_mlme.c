@@ -425,7 +425,7 @@ int32_t ti_drv_txAssocReqPacket(ti_driver_ifData_t *apDrv,
             /* copy header */
             os_memcpy(pkt->header, (void*)(pDesc->address), pDesc->uHeaderLen-extraHThdr);
             /* copy payload */
-            os_memcpy(pkt->payload, (void*)(pDesc->address + pDesc->uHeaderLen), pDesc->uPayloadLen);
+            os_memcpy(pkt->payload, (uint8_t *)pDesc->address + pDesc->uHeaderLen, pDesc->uPayloadLen);
 
             pkt->flags |= PKTF_EXTERNAL_CONTEXT;
             pkt->fTxCompleteCb = (TMgmtPacketCb)CME_TxResult;

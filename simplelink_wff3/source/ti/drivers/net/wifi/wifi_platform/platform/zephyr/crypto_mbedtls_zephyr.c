@@ -30,6 +30,7 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <zephyr/random/random.h>
 #include "utils/common.h"
 #include <mbedtls/version.h>
 #include <mbedtls/entropy.h>
@@ -37,7 +38,6 @@
 #include <mbedtls/platform_util.h> /* mbedtls_platform_zeroize() */
 #include <mbedtls/asn1.h>
 #include <mbedtls/asn1write.h>
-#include <zephyr/random/random.h>
 #if defined(TI_WIFI_CRYPTO_BACKEND_ZEPHYR_PSA) || \
     defined(TI_WIFI_CRYPTO_BACKEND_ZEPHYR_MBEDTLS)
 #define TI_WIFI_CRYPTO_BACKEND_ZEPHYR

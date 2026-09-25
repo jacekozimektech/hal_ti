@@ -5867,9 +5867,6 @@ void ti_driver_p2p_dev_found(struct wpa_supplicant *wpa_s, const uint8_t *peer_a
 void ti_driver_go_neg_completed(struct wpa_supplicant *wpa_s,
                                 struct p2p_go_neg_results *res)
 {
-    ti_driver_ifData_t *pDrv = (ti_driver_ifData_t *)wpa_s->drv_priv;
-    uint32_t roleId;
-
     CME_PRINT_REPORT("\n\rP2P neg completed status=%d  isGO=%d peer=" MACSTR, res->status, res->role_go, MAC2STR(res->peer_device_addr));
     GTRACE(GRP_DRIVER_CC33, "ti_driver_go_neg_completed: res.ssid=%s status:%d  isGO=%d peer=" MACSTR, 
             res->ssid, res->status, res->role_go, MAC2STR(res->peer_device_addr));

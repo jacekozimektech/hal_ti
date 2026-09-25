@@ -370,8 +370,9 @@ int ext_wps_registrar_add_pin(struct wpa_supplicant *wpa_s, const u8 *addr,
     struct hostapd_data *hapd = wpa_s->ap_iface->bss[0];
     struct wps_registrar *reg = hapd->wps->registrar;
 
-    if (pin == NULL)
+    if (pin == NULL) {
         return -1;
+    }
 
 	p = os_zalloc(sizeof(*p));
 	if (p == NULL)

@@ -5321,7 +5321,6 @@ void drv_handleUnprotRxDeauth (void *descriptor, uint32 roleId)
         GTRACE(GRP_MGMT_PROTECTION,"MPF: Deassoc to Supplicant");
         wpa_supplicant_event(pDrv->ctx, EVENT_UNPROT_DISASSOC, &eventData);
     }
-fail:
     RxBufFree(desc);
     HOOK(HOOK_IN_DRIVER_TI_WIFI);
 

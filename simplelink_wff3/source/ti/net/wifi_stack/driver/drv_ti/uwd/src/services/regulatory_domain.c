@@ -234,7 +234,9 @@ RegulatoryDomain_t RegulatoryDomain;
 ///********************************************************************************/
 ///*						Internal functions prototypes.							*/
 ///********************************************************************************/
+#if 0
 static void setWorldWideDomainSupportedChannels();
+#endif
 static void sendRegDomainCmdToFw();
 static void verifyDfsChannelValidity(channelCapability_t *pSupportedChannels, uint8_t channelIndex);
 static int32_t getCountryIdInTable(uint8_t *pCountryStr, uint32_t *pCountryID);
@@ -958,6 +960,7 @@ int32_t regulatoryDomain_SetCountry(uint8_t *pCountryStr)
 //*
 //*
 //*************************************************************************/
+#if 0
 static void setWorldWideDomainSupportedChannels()
 {
     RegulatoryDomain_t  *pRegulatoryDomain = &RegulatoryDomain;
@@ -1029,6 +1032,7 @@ static void setWorldWideDomainSupportedChannels()
 	}
 
 }
+#endif
 
 static void sendRegDomainCmdToFw()
 {

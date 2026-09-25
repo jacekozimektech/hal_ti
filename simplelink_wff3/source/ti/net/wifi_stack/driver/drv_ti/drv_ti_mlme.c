@@ -1904,8 +1904,8 @@ int32_t getWmmConfig(struct ieee802_11_elems *apParsedElems,    // IN  - points 
         GTRACE(GRP_DRIVER_CC33, "WMM IE OUI is OK, checking WME params");
 
         if( ( (*(uint8_t *)(pWmmData+3)) == dot11_WME_OUI_TYPE ) &&
-            ( (*(uint8_t *)(pWmmData+4)) == dot11_WME_OUI_SUB_TYPE_PARAMS_IE ) ||
-            ( (*(uint8_t *)(pWmmData+4)) == dot11_WME_OUI_SUB_TYPE_IE  ) )
+            ( ( (*(uint8_t *)(pWmmData+4)) == dot11_WME_OUI_SUB_TYPE_PARAMS_IE ) ||
+              ( (*(uint8_t *)(pWmmData+4)) == dot11_WME_OUI_SUB_TYPE_IE  ) ) )
         {
 
             GTRACE(GRP_DRIVER_CC33, "WME OUI type & sub type are OK, checking WME params");

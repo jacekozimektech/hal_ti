@@ -1235,7 +1235,7 @@ int8_t trnspt_cmd_build_scan_channel_list(ScanParams_t *scanParam,
     volatile uint8_t    index = 0;
     uint8_t             index24 = 0;
     uint8_t             index5 = SCAN_MAX_CHANNELS_BG;
-    uint8_t             ret = 0, is5GhzSupported = 0;
+    uint8_t             is5GhzSupported = 0;
 
     // Check if there is channel list comes from supplicant
     if (NULL != apSuppParams)

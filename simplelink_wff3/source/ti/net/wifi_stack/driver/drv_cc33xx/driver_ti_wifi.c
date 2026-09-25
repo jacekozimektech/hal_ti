@@ -4120,7 +4120,7 @@ static void sendEventDeauthDisassoc(ti_driver_ifData_t *apDrv, uint32_t aType,
     char macStr[MAC_STR_LEN];
     union wpa_event_data event;
     uint32  minLen = WLAN_HDR_LEN + sizeof(apMngPack->u.deauth);
-    uint16 reason_code;
+    uint16 reason_code = 0;
     enum wpa_event_type   type;
 
     GET_MAC_STR(apMngPack->bssid, macStr);
@@ -4214,7 +4214,7 @@ static void sendEventUnprotDeauthDisassoc(ti_driver_ifData_t *apDrv, uint32_t aT
     char macStr[MAC_STR_LEN];
     union wpa_event_data event;
     uint32  minLen = WLAN_HDR_LEN + sizeof(apMngPack->u.deauth);
-    uint16 reason_code;
+    uint16 reason_code = 0;
     enum wpa_event_type  type;
 
     GET_MAC_STR(apMngPack->bssid, macStr);

@@ -733,7 +733,6 @@ int cc3xxx_trnspt_cmd_if_stop_role (void *apDrv)
         {
             // Remove link 
             uint32_t    uHlid;
-            linkType_e eLinkType;
             EWlanLinkState eState;
             for (uHlid=0; uHlid<WLANLINKS_MAX_LINKS; uHlid++)
             {
@@ -767,6 +766,12 @@ int cc3xxx_trnspt_cmd_if_stop_role (void *apDrv)
                 wlanLinks_GetLinkState(&eState, uHlid);
                 if((TIWDRV_NETIF_ID_SAP == wlanLinks_GetNetIfId(uHlid)) && WLANLINK_STATE_FREE != eState)
                 {
+                    if (wlanLinks_GetLinkType(&eLinkType, uHlid) != OK)
+                    {
+                        ASSERT_GENERAL(0);
+                        return -NOK;
+                    }
+
                     if ((eLinkType != WLANLINK_TYPE_SPECIFIC))
                     {
                         udata_ResetLinkStats(uHlid);
@@ -806,6 +811,12 @@ int cc3xxx_trnspt_cmd_if_stop_role (void *apDrv)
                 if((TIWDRV_NETIF_ID_P2PDEV == wlanLinks_GetNetIfId(uHlid)) &&
                         WLANLINK_STATE_FREE != eState)
                 {
+                    if (wlanLinks_GetLinkType(&eLinkType, uHlid) != OK)
+                    {
+                        ASSERT_GENERAL(0);
+                        return -NOK;
+                    }
+
                     if ((eLinkType != WLANLINK_TYPE_SPECIFIC))
                     {
                         udata_ResetLinkStats(uHlid);

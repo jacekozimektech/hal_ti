@@ -363,7 +363,7 @@ int32_t ti_drv_txAssocReqPacket(ti_driver_ifData_t *apDrv,
     struct ieee80211_mgmt  *pMngPack;
     uint8_t  ratesBuf[DOT11_MAX_SUPPORTED_RATES];
     uint8_t   *pPack;
-    uint32_t  len,payloadSize,total_len;
+    uint32_t  len,total_len;
     uint32_t  actualSize = 0, extraHThdr;
     uint8_t   fixedFieldsLen = 0;
     uint32_t  taggedFieldsLen = 0;

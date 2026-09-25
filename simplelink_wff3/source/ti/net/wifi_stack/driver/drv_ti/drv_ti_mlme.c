@@ -1276,7 +1276,9 @@ rxMngPackNextOperation_e ti_drv_rxAssocResponsePacket(
 {
     char macSender[MAC_STR_LEN];
     uint8_t   *pIes;
+#if 0
     uint8_t   secType = 0;
+#endif
     uint16_t  status_code;
     uint32_t  minLen = WLAN_HDR_LEN + sizeof(apMngPack->u.assoc_resp);
     struct ieee802_11_elems parsedElems;
@@ -1976,4 +1978,3 @@ void markDisconnected(ti_driver_ifData_t *apDrv, uint32_t aCaller)
 	apDrv->associated = FALSE;
 	IRQ_UtilZeroMacAddress(apDrv->currBssid);
 }
-

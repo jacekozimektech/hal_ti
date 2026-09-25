@@ -5393,7 +5393,7 @@ void drv_handleRxEapol(void *aDesc)
     HOOK(HOOK_IN_DRIVER_TI_WIFI);
 
     RxIfDescriptor_t *desc = (RxIfDescriptor_t *)aDesc;
-    ti_driver_ifData_t     *pDrv;
+    ti_driver_ifData_t     *pDrv = NULL;
     uint8_t netif = TIWDRV_NETIF_NUM;
     tiwdrv_if_mode_e netifMode = TIWDRV_IF_MODE_UNKNOWN;
     uint32_t roleId = 0;

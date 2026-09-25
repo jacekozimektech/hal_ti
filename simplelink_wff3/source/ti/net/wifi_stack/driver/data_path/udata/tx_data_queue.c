@@ -65,7 +65,9 @@ typedef enum
 } EAcPriority;
 
 
+#if 0
 const static EAcTrfcType acPriorityToAcIdTable[MAX_NUM_OF_AC] = {QOS_AC_BK, QOS_AC_BE, QOS_AC_VI, QOS_AC_VO};
+#endif
 const static uint32_t MinGuarantee_PerAc[MAX_NUM_OF_AC] = {TX_DATA_MIN_GUARANTEE_BE_DEF, 
                                                               TX_DATA_MIN_GUARANTEE_BK_DEF,
                                                               TX_DATA_MIN_GUARANTEE_VI_DEF,
@@ -99,7 +101,9 @@ uint32_t gErrorNullBlk = 0;
 
 /* Internal Functions prototypes */
 static void txDataQ_RunScheduler (void* hCbHndl);
+#if 0
 static void txDataQ_TxSendPaceTimeout (Bool_e bTwdInitOccured);
+#endif
 #ifdef TI_DBG
 static void txDataQ_PrintResources (void);
 #endif
@@ -1788,6 +1792,7 @@ static void scheduleQueuesPerPriority(int32_t *retVal)
  *
  * \sa
  */
+#if 0
 static void txDataQ_TxSendPaceTimeout (Bool_e bTwdInitOccured)
 {
     TTxDataQ *pTxDataQ = gTxDataQCB;
@@ -1796,3 +1801,4 @@ static void txDataQ_TxSendPaceTimeout (Bool_e bTwdInitOccured)
 
     txDataQ_ReqToRunTxScheduler();
 }
+#endif

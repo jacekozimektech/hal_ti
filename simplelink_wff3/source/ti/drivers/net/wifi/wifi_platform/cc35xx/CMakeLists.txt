@@ -16,8 +16,9 @@ if(CONFIG_WIFI_TI_CC35XX_USE_ZEPHYR_MBEDTLS)
     TI_WIFI_CRYPTO_BACKEND_ZEPHYR_MBEDTLS
   )
   zephyr_library_sources(
-    platform/zephyr/crypto_mbedtls_zephyr.c
+    ../platform/zephyr/crypto_mbedtls_zephyr.c
   )
+  zephyr_include_directories(../platform/zephyr)
   zephyr_library_link_libraries(mbedTLS)
 elseif(CONFIG_WIFI_TI_CC35XX_USE_TI_MBEDTLS)
   zephyr_library_sources(
